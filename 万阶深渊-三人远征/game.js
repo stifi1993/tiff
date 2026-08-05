@@ -6,6 +6,8 @@
   const LEGACY_SAVE_KEYS = ["abyss-expedition-v1", "abyss-expedition-backup-v1"];
   const MAX_STAGE = 10000;
   const OFFLINE_CAP = 12 * 60 * 60;
+  const ENEMY_HP_GROWTH = 1.0006725;
+  const ENEMY_ATK_GROWTH = 1.0006;
   const assetCache = new Map();
   const spriteTimers = new WeakMap();
   let preloadedZone = -1;
@@ -334,9 +336,9 @@
     scheduleZonePreload(zoneIndex);
     const boss = stage % 100 === 0;
     const elite = !boss && stage % 10 === 0;
-    const power = Math.pow(1.0052, stage - 1) * (1 + zoneIndex * .42);
+    const power = Math.pow(ENEMY_HP_GROWTH, stage - 1) * (1 + zoneIndex * .42);
     let hp = 115 * power * (boss ? 17 : elite ? 3.1 : 1);
-    const atk = 10 * Math.pow(1.00485, stage - 1) * (boss ? 2.8 : elite ? 1.5 : 1);
+    const atk = 10 * Math.pow(ENEMY_ATK_GROWTH, stage - 1) * (boss ? 2.8 : elite ? 1.5 : 1);
     const evo = bossEvolution(stage);
     const enemyType = (stage - 1) % 3;
     runtime.enemy = { maxHp: hp, hp, atk, boss, elite, zoneIndex, evo, enemyType, debuff: 0 };
@@ -419,23 +421,17 @@
     let safety = 0;
     runtime.backgroundMode = true;
     while (remaining > 0 && safety++ < 200000 && !state.completed) {
-      if (state.activeBossStage && runtime.retryRemaining > 0) {
-        const waitCombat = runtime.retryRemaining * state.speed;
-        if (remaining < waitCombat) {
-          runtime.retryRemaining -= remaining / state.speed;
-          runtime.retryAt = Date.now() + runtime.retryRemaining * 1000;
-          break;
-        }
-        remaining -= waitCombat;
-        runtime.retryRemaining = 0;
-        runtime.retryAt = 0;
-        immediateChallenge();
-        continue;
-      }
+      if (state.activeBossStage && runtime.retryRemaining <= 0) { immediateChallenge(); continue; }
       if (!runtime.enemy) spawnStage(state.stage, true);
-      const nextEvent = nextCombatEvent(remaining);
+      const retryCombat = state.activeBossStage ? runtime.retryRemaining * state.speed : Infinity;
+      const nextEvent = Math.min(nextCombatEvent(remaining), retryCombat);
       simulateDetailed(nextEvent);
       remaining -= nextEvent;
+      if (state.activeBossStage) {
+        runtime.retryRemaining = Math.max(0, runtime.retryRemaining - nextEvent / state.speed);
+        runtime.retryAt = Date.now() + runtime.retryRemaining * 1000;
+        if (runtime.retryRemaining <= 0) immediateChallenge();
+      }
     }
     runtime.backgroundMode = false;
   }
@@ -567,6 +563,11 @@
       state.stage = MAX_STAGE; state.bestStage = MAX_STAGE; state.completed = true; dom.victory.classList.remove("hidden"); saveState(); return;
     }
     state.bestStage = Math.max(state.bestStage, runtime.battleStage);
+    if (state.activeBossStage && runtime.battleStage === state.activeBossStage - 1) {
+      state.stage = runtime.battleStage;
+      spawnStage(state.stage, false);
+      return;
+    }
     state.stage = runtime.battleStage + 1;
     state.activeBossStage = 0; runtime.retryAt = 0; runtime.retryRemaining = 0;
     spawnStage(state.stage, false);
@@ -584,7 +585,14 @@
       runtime.retryRemaining = 30;
       state.stage = Math.max(1, failedStage - 1);
       if (!background) toast(`${bossName(failedStage)}挑战失败，退回前一关整备`, true);
-    } else state.stage = Math.max(1, failedStage);
+    } else {
+      const progress = runtime.enemy ? clamp(1 - runtime.enemy.hp / Math.max(1, runtime.enemy.maxHp), .05, .9) : .05;
+      const gold = (12 + failedStage * .85) * .18 * progress * bonfireMultiplier("gold");
+      const xp = (8 + failedStage * .48) * .14 * progress;
+      state.gold += gold;
+      state.heroes.forEach(hero => addXpRaw(hero, xp));
+      state.stage = Math.max(1, failedStage);
+    }
     resetPartyRuntime();
     runtime.pendingSpawn = false;
     spawnStage(state.stage, true);
@@ -928,7 +936,7 @@
     dom.bossPortrait.src=bossFrameUrl(zoneOf(nextBoss),evo);
     if(state.activeBossStage){const sec=Math.max(0,Math.ceil((runtime.retryAt-Date.now())/1000));dom.retryText.textContent=sec?`${sec}秒后自动挑战`:"准备重返Boss战";dom.challengeBtn.disabled=false;}else{dom.retryText.textContent="尚未遭遇";dom.challengeBtn.disabled=true;}
     dom.dropPreview.innerHTML=[["weapon","武器"],["armor","护甲"],["relic","饰品"]].map(([slot,name])=>`<div class="drop-slot"><b class="gear-icon" style="margin:auto;${gearIconStyle(slot,zoneOf(nextBoss)%5)}"></b>${name}</div>`).join("");
-    const bossPower=Math.pow(1.0052,nextBoss-1)*(1+zoneOf(nextBoss)*.42),bossHp=115*bossPower*17;
+    const bossPower=Math.pow(ENEMY_HP_GROWTH,nextBoss-1)*(1+zoneOf(nextBoss)*.42),bossHp=115*bossPower*17;
     const ratio=estimatedDps()*30/bossHp;
     const winChance=Math.round(clamp(100/(1+Math.exp(-(ratio-1)*3)),3,99));
     dom.bossWinChance.textContent=`预计胜率 · ${winChance}%`;

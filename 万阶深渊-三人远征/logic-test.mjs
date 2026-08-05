@@ -86,7 +86,11 @@ assert.equal(api.snapshot().runtime.battleStage, 200, "30 秒重试入口必须�
 
 api.setStage(300);
 api.failNow();
-api.backgroundSeconds(31);
+const farmKills = api.snapshot().state.totalKills;
+api.backgroundSeconds(10);
+assert.equal(api.snapshot().runtime.battleStage, 299, "Boss重试倒计时内必须重复刷前一关");
+assert.ok(api.snapshot().state.totalKills > farmKills, "Boss重试倒计时内必须实际重复击败前一关敌人");
+api.backgroundSeconds(21);
 assert.equal(api.snapshot().runtime.battleStage, 300, "后台等待满 30 秒后必须自动返回 Boss 关");
 
 api.setStage(1000);
@@ -147,6 +151,11 @@ assert.equal(snap.state.stage, 1, "连续五次Boss失败且收益充足时必�
 assert.equal(snap.state.rebirths, 1, "智能重整次数必须正确累计");
 assert.ok(snap.state.bonfire.level >= 3, "重整余烬必须自动点亮篝火星图");
 
+const normalWall = createContext({ version: 3, stage: 9999, bestStage: 9998, gold: 0, autoTrain: { enabled: false, priority: "智能" }, lastSavedAt: Date.now() }, "abyss-expedition-v3", 123);
+normalWall.setStage(9999);
+normalWall.failNow();
+assert.ok(normalWall.snapshot().state.gold > 0, "非Boss数值墙失败后必须获得小额成长资源，避免永久死锁");
+
 if (process.argv.includes("--balance")) {
   const hoursArg = process.argv.find(arg => arg.startsWith("--hours="));
   const hours = Math.max(1, Number(hoursArg?.split("=")[1]) || 80);
@@ -157,4 +166,4 @@ if (process.argv.includes("--balance")) {
   console.log(`${hours}小时平衡模拟`, JSON.stringify({ stage: balanceSnap.state.stage, bestStage: balanceSnap.state.bestStage, completed: balanceSnap.state.completed, rebirths: balanceSnap.state.rebirths, bonfire: balanceSnap.state.bonfire.level, elapsedMs: Date.now() - balanceStart }));
 }
 
-console.log("逻辑测试通过：Boss规则、区域边界、失败重试、智能重整、篝火星图、前后台一致性、10000关终点、关闭收益与v3强制开档均符合设计。");
+console.log("逻辑测试通过：Boss规则、区域边界、失败刷关、普通关保底成长、智能重整、篝火星图、前后台一致性、10000关终点、关闭收益与v3强制开档均符合设计。");

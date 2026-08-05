@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>万阶深渊 · 独立帧素材检查</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;padding:24px;background:#090c12;color:#e5e8ef;font:14px/1.5 system-ui,sans-serif}h1,h2{color:#e8c879}header{position:sticky;top:0;z-index:2;padding:12px 16px;background:#111724;border:1px solid #344057}#status{color:#7ee6d8}.grid{display:grid;grid-template-columns:repeat(10,minmax(90px,1fr));gap:8px}.card{min-width:0;padding:6px;border:1px solid #283246;background:#141a25;text-align:center}.card img{display:block;width:100%;aspect-ratio:1;object-fit:contain;image-rendering:pixelated;background:#1b222e}.card small{display:block;overflow:hidden;margin-top:4px;color:#aeb8c9;text-overflow:ellipsis;white-space:nowrap}.sequence{margin-bottom:18px}.compact .card img{aspect-ratio:1}.compact{grid-template-columns:repeat(12,minmax(72px,1fr))}@media(max-width:1200px){.grid,.compact{grid-template-columns:repeat(6,minmax(72px,1fr))}}
+  </style>
+</head>
+<body>
+  <header><h1>独立帧素材检查</h1><strong id="status">准备加载 424 帧…</strong></header>
+  <main id="content"></main>
+  <script>
+    const content=document.querySelector('#content'),status=document.querySelector('#status');
+    let loaded=0,failed=0,total=0;
+    const addSection=(title,className='grid')=>{const section=document.createElement('section');section.innerHTML=`<h2>${title}</h2><div class="${className}"></div>`;content.appendChild(section);return section.lastElementChild;};
+    const addImage=(grid,src,label)=>{total+=1;const card=document.createElement('div');card.className='card';card.innerHTML=`<img src="${src}?v=5" alt="${label}"><small>${label}</small>`;const image=card.firstElementChild;image.onload=done;image.onerror=()=>{failed+=1;done()};grid.appendChild(card);};
+    function done(){loaded+=1;status.textContent=`已加载 ${loaded}/${total} · 失败 ${failed}`;if(loaded===total){document.documentElement.dataset.qa=failed?'failed':'passed';document.documentElement.dataset.frames=String(total);}}
+    const bossGrid=addSection('100 个 Boss 形态');
+    for(let family=1;family<=10;family++)for(let form=1;form<=10;form++){const f=String(family).padStart(2,'0'),e=String(form).padStart(2,'0');addImage(bossGrid,`../assets-v3/bosses/family-${f}/form-${e}.webp`,`Boss ${f}-${e}`);}
+    const actions=['idle','move','attack','skill','ultimate','hit','down'];
+    for(const hero of ['yutong','wangshang','chongrui']){const grid=addSection(`英雄 ${hero} · 28 帧`,'grid compact');for(const action of actions)for(let frame=1;frame<=4;frame++)addImage(grid,`../assets-v3/heroes/${hero}/${action}-${frame}.webp`,`${action}-${frame}`);}
+    for(let zone=1;zone<=10;zone++){const z=String(zone).padStart(2,'0'),grid=addSection(`区域 ${z} · 24 个敌人动作帧`,'grid compact');for(let enemy=1;enemy<=3;enemy++)for(const action of ['idle','attack'])for(let frame=1;frame<=4;frame++){const e=String(enemy).padStart(2,'0');addImage(grid,`../assets-v3/enemies/zone-${z}/enemy-${e}-${action}-${frame}.webp`,`${e}-${action}-${frame}`);}}
+  </script>
+</body>
+</html>

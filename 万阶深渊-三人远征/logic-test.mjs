@@ -24,7 +24,7 @@ class FakeElement {
   closest() { return null; }
 }
 
-function createContext(saved = null) {
+function createContext(saved = null, saveKey = "abyss-expedition-v3", seed = 123456789) {
   const elements = new Map();
   const get = selector => {
     if (!elements.has(selector)) elements.set(selector, new FakeElement());
@@ -37,10 +37,17 @@ function createContext(saved = null) {
     createElement: () => new FakeElement(),
     addEventListener() {}
   };
-  const storage = new Map(saved ? [["abyss-expedition-v1", JSON.stringify(saved)]] : []);
+  const storage = new Map(saved ? [[saveKey, JSON.stringify(saved)]] : []);
   const localStorage = { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) };
+  let randomState = seed >>> 0;
+  const seededMath = Object.create(Math);
+  seededMath.random = () => {
+    randomState = (1664525 * randomState + 1013904223) >>> 0;
+    return randomState / 4294967296;
+  };
   const context = {
     console, document, localStorage, navigator: {}, location: { reload() {} },
+    Math: seededMath,
     performance: { now: () => 1000 },
     addEventListener() {},
     setInterval: () => 0, clearInterval() {}, setTimeout: fn => { fn(); return 0; }, clearTimeout() {},
@@ -50,7 +57,9 @@ function createContext(saved = null) {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(fs.readFileSync("game.js", "utf8"), context, { filename: "game.js" });
-  return context.__ABYSS_TEST__;
+  const api = context.__ABYSS_TEST__;
+  api.storageKeys = () => [...storage.keys()];
+  return api;
 }
 
 const api = createContext();
@@ -102,6 +111,27 @@ const oneHourAgo = Date.now() - 3600_000;
 const offline = createContext({ stage: 50, bestStage: 49, gold: 100, lastSavedAt: oneHourAgo });
 snap = offline.snapshot();
 assert.equal(snap.state.stage, 50, "关闭网页后不得推进关卡");
-assert.ok(snap.state.gold > 100, "关闭网页后应继续累计金币");
+assert.ok(snap.state.heroes.some(hero => hero.training > 0 || hero.level > 1), "关闭收益必须结算为金币、经验并自动用于成长");
 
-console.log("逻辑测试通过：Boss 规则、区域边界、失败重试、10000 关终点与关闭收益均符合设计。 ");
+const legacy = createContext({ stage: 999, bestStage: 999, gold: 999999 }, "abyss-expedition-v1");
+assert.equal(legacy.snapshot().state.stage, 1, "v3 必须从全新存档开始");
+assert.ok(!legacy.storageKeys().includes("abyss-expedition-v1"), "旧版存档键必须按产品约定直接删除");
+
+const paritySave = { version: 3, stage: 8, bestStage: 8, gold: 0, autoTrain: { enabled: false, priority: "智能" }, lastSavedAt: Date.now() };
+const foreground = createContext(paritySave, "abyss-expedition-v3", 42);
+const background = createContext(paritySave, "abyss-expedition-v3", 42);
+foreground.detailedSeconds(5);
+background.backgroundSeconds(5);
+const frontSnap = foreground.snapshot();
+const backSnap = background.snapshot();
+assert.equal(backSnap.runtime.battleStage, frontSnap.runtime.battleStage, "前后台必须推进到同一关卡");
+assert.ok(Math.abs(backSnap.runtime.enemy.hp - frontSnap.runtime.enemy.hp) < 1e-6, "前后台敌人剩余生命必须一致");
+assert.equal(JSON.stringify(backSnap.runtime.heroes.map(hero => [hero.hp, hero.energy, hero.alive])), JSON.stringify(frontSnap.runtime.heroes.map(hero => [hero.hp, hero.energy, hero.alive])), "前后台队伍状态必须一致");
+
+const longBackground = createContext({ version: 3, stage: 1, bestStage: 1, gold: 40, lastSavedAt: Date.now() }, "abyss-expedition-v3", 7);
+const longStart = Date.now();
+longBackground.backgroundSeconds(3600);
+assert.ok(Date.now() - longStart < 5000, "一小时后台补算必须在5秒内完成");
+assert.ok(longBackground.snapshot().state.totalKills > 0, "长时间后台补算必须实际执行战斗");
+
+console.log("逻辑测试通过：Boss规则、区域边界、失败重试、10000关终点、关闭收益与v3强制开档均符合设计。");

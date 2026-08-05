@@ -1,14 +1,15 @@
 (() => {
   "use strict";
 
-  const SAVE_KEY = "abyss-expedition-v1";
-  const BACKUP_KEY = "abyss-expedition-backup-v1";
-  const SAVE_VERSION = 2;
+  const SAVE_KEY = "abyss-expedition-v3";
+  const SAVE_VERSION = 3;
+  const LEGACY_SAVE_KEYS = ["abyss-expedition-v1", "abyss-expedition-backup-v1"];
   const MAX_STAGE = 10000;
   const OFFLINE_CAP = 12 * 60 * 60;
   const assetCache = new Map();
   const spriteTimers = new WeakMap();
   let preloadedZone = -1;
+  let visualRandomState = (Date.now() ^ 0x9e3779b9) >>> 0;
 
   const ZONES = [
     { name: "苔痕地窟", boss: "苔岩巨魔", desc: "盘踞在潮湿石窟中的远古巨兽。", enemies: ["洞穴黏怪", "苔甲鼠", "石牙蝠"], hue: "#59774b" },
@@ -55,15 +56,19 @@
   let lastSave = performance.now();
   let sessionOpenAt = Date.now();
 
+  // v3 是全新数值版本：按产品约定直接移除旧版存档，不执行迁移或备份。
+  LEGACY_SAVE_KEYS.forEach(key => localStorage.removeItem(key));
+
   function initialState() {
     return {
       version: SAVE_VERSION, stage: 1, bestStage: 1, gold: 40, dust: 0, embers: 0, totalKills: 0,
       rebirths: 0, speed: 1, completed: false, lastSavedAt: Date.now(), activeBossStage: 0,
       heroes: HERO_DEFS.map(() => ({ level: 1, xp: 0, training: 0, skillLevels: [1, 0, 0, 0], gear: { weapon: null, armor: null, relic: null } })),
       bag: [], talents: { guard: 0, hunt: 0, star: 0, guardCore: false, huntCore: false, starCore: false },
-      autoTrain: { enabled: false, priority: "均衡" }, autoSalvage: { 普通: false, 稀有: false, 史诗: false },
+      autoTrain: { enabled: true, priority: "智能" }, autoSalvage: { 普通: true, 稀有: true, 史诗: true },
       codex: { bosses: [], enemies: [], gear: [] }, firstZoneSeen: [0], firstBossSeen: [],
-      settings: { showDamage: true, uiScale: 100, highContrast: false, reduceMotion: false, particles: true },
+      autoLog: [], autoTotals: { training: 0, skills: 0, equips: 0, enhances: 0 },
+      settings: { showDamage: true, uiScale: 100, highContrast: false, reduceMotion: false, particles: true, autoMaxSpeed: true },
       guide: { step: 0, dismissed: false }
     };
   }
@@ -77,6 +82,9 @@
     merged.autoTrain = { ...base.autoTrain, ...(saved.autoTrain || {}) };
     merged.autoSalvage = { ...base.autoSalvage, ...(saved.autoSalvage || {}) };
     merged.codex = { ...base.codex, ...(saved.codex || {}) };
+    merged.autoTotals = { ...base.autoTotals, ...(saved.autoTotals || {}) };
+    merged.autoLog = Array.isArray(saved.autoLog) ? saved.autoLog.slice(0, 30) : [];
+    merged.bag = [];
     merged.settings = { ...base.settings, ...(saved.settings || {}) };
     merged.guide = { ...base.guide, ...(saved.guide || {}) };
     merged.version = SAVE_VERSION;
@@ -89,12 +97,6 @@
     try {
       const raw = localStorage.getItem(SAVE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      if (raw) {
-        if ((parsed.version || 1) < SAVE_VERSION && !localStorage.getItem(BACKUP_KEY)) {
-          try { localStorage.setItem(BACKUP_KEY, raw); }
-          catch (backupError) { console.warn("升级前存档备份失败", backupError); }
-        }
-      }
       const loaded = mergeState(parsed);
       if (raw && loaded.lastSavedAt) {
         const seconds = Math.min(OFFLINE_CAP, Math.max(0, (Date.now() - loaded.lastSavedAt) / 1000));
@@ -128,6 +130,7 @@
     const r = {
       enemy: null, timer: 12, enemyAttack: 1.2, bossAttackCount: 0, retryAt: 0, retryRemaining: 0,
       battleStage: state.stage, stats: [], paused: false, pendingSpawn: false,
+      backgroundMode: false,
       heroes: HERO_DEFS.map(() => ({ hp: 1, maxHp: 1, energy: 0, attackCd: .2 + Math.random() * .5, skillCd: 2.2, shield: 0, alive: true }))
     };
     return r;
@@ -149,6 +152,7 @@
       bossWinChance: $("#bossWinChance"), guideTip: $("#guideTip")
     });
     applyDisplaySettings();
+    if (state.pendingOffline) processAutomaticGrowth(5000);
     buildSprites();
     bindEvents();
     spawnStage(state.stage, true);
@@ -161,7 +165,6 @@
     }
     if (!state.guide.dismissed) setTimeout(showGuide, 900);
     setInterval(loop, 100);
-    setInterval(() => saveState(false), 5000);
     window.addEventListener("beforeunload", () => saveState(false));
     if (document.documentElement && typeof performance !== "undefined") {
       document.documentElement.dataset.interactiveMs = String(Math.round(performance.now()));
@@ -262,13 +265,17 @@
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const speed = event.target.closest("[data-speed]");
-      if (speed && !speed.classList.contains("locked")) { state.speed = Number(speed.dataset.speed); render(); return; }
+      if (speed && !speed.classList.contains("locked")) { state.speed = Number(speed.dataset.speed); state.settings.autoMaxSpeed = false; render(); return; }
       const tab = event.target.closest("[data-tab]");
       if (tab) { openDrawer(tab.dataset.tab); return; }
       const action = event.target.closest("[data-action]");
       if (action) handleAction(action.dataset.action, action.dataset); 
     });
-    $("#upgradeAllBtn").addEventListener("click", upgradeAll);
+    $("#upgradeAllBtn").addEventListener("click", () => {
+      const bought = processAutomaticGrowth(500);
+      toast(bought ? `自动完成${bought}次成长` : "当前资源不足");
+      render(true);
+    });
     $("#autoTrainBtn").addEventListener("click", toggleAutoTrain);
     dom.challengeBtn.addEventListener("click", immediateChallenge);
     dom.drawerClose.addEventListener("click", closeDrawer);
@@ -279,7 +286,7 @@
   }
 
   function openDrawer(tab = "team") {
-    const titles = { team: "队伍详情", gear: "装备与背包", talent: "永久天赋", codex: "深渊图鉴", rebirth: "篝火重整", settings: "远征设置" };
+    const titles = { team: "队伍成长", codex: "深渊图鉴", rebirth: "篝火星图", settings: "远征设置" };
     activeTab = tab;
     drawerOpen = true;
     dom.drawerTitle.textContent = titles[tab] || "远征整备";
@@ -303,7 +310,7 @@
     lastFrame = now;
     if (!runtime.paused && !state.completed) {
       if (elapsed > 2) simulateBackground(elapsed * state.speed);
-      else { maybeAutoChallenge(elapsed); simulateDetailed(Math.min(elapsed, .5) * state.speed); }
+      else { maybeAutoChallenge(elapsed); simulateForeground(Math.min(elapsed, .5) * state.speed); }
     }
     if (now - lastRender > 180) { render(); lastRender = now; }
     if (now - lastSave > 5000) { saveState(false); lastSave = now; }
@@ -326,11 +333,11 @@
     runtime.bossAttackCount = 0;
     runtime.pendingSpawn = false;
     if (fresh || runtime.heroes.every(h => !h.alive)) resetPartyRuntime();
-    updateEnemySprite();
+    if (!runtime.backgroundMode) updateEnemySprite();
     discoverEnemy();
     if (boss && !state.firstBossSeen.includes(stage)) {
       state.firstBossSeen.push(stage);
-      showBossIntro(stage);
+      if (!runtime.backgroundMode) showBossIntro(stage);
     }
     if (!state.firstZoneSeen.includes(zoneIndex)) {
       state.firstZoneSeen.push(zoneIndex);
@@ -342,6 +349,16 @@
     runtime.heroes.forEach((hero, i) => {
       const stats = heroStats(i);
       hero.maxHp = stats.hp; hero.hp = stats.hp; hero.energy = 0; hero.attackCd = .2 + i * .2; hero.skillCd = 2 + i; hero.shield = 0; hero.alive = true;
+    });
+  }
+
+  function refreshPartyStats() {
+    runtime.heroes.forEach((hero, i) => {
+      const previousMax = Math.max(1, hero.maxHp);
+      const healthRatio = hero.alive ? clamp(hero.hp / previousMax, 0, 1) : 0;
+      const stats = heroStats(i);
+      hero.maxHp = stats.hp;
+      hero.hp = hero.alive ? Math.max(1, stats.hp * healthRatio) : 0;
     });
   }
 
@@ -358,15 +375,38 @@
       if (hero.attackCd <= 0) heroAttack(i);
     });
     if (runtime.enemyAttack <= 0 && runtime.enemy.hp > 0) enemyAttack();
-    if (runtime.timer <= 0 || runtime.heroes.every(h => !h.alive)) failStage();
+    if (runtime.timer <= 0 || runtime.heroes.every(h => !h.alive)) failStage(runtime.backgroundMode);
     processAutoTrain(dt);
     trimStats();
+  }
+
+  function nextCombatEvent(remaining) {
+    const heroEvents = runtime.heroes.flatMap((hero, i) => {
+      if (!hero.alive) return [];
+      const events = [hero.attackCd];
+      if (state.heroes[i].skillLevels[1] > 0) events.push(hero.skillCd);
+      if (hero.energy >= 100 && state.heroes[i].skillLevels[3] > 0) events.push(.001);
+      return events;
+    });
+    return Math.max(.001, Math.min(remaining, runtime.timer, runtime.enemyAttack, ...heroEvents.filter(Number.isFinite)));
+  }
+
+  function simulateForeground(seconds) {
+    let remaining = seconds;
+    let safety = 0;
+    runtime.backgroundMode = false;
+    while (remaining > 0 && safety++ < 1000 && !state.completed && runtime.enemy && !runtime.pendingSpawn) {
+      const nextEvent = nextCombatEvent(remaining);
+      simulateDetailed(nextEvent);
+      remaining -= nextEvent;
+    }
   }
 
   function simulateBackground(seconds) {
     let remaining = seconds;
     let safety = 0;
-    while (remaining > 0 && safety++ < 20000 && !state.completed) {
+    runtime.backgroundMode = true;
+    while (remaining > 0 && safety++ < 200000 && !state.completed) {
       if (state.activeBossStage && runtime.retryRemaining > 0) {
         const waitCombat = runtime.retryRemaining * state.speed;
         if (remaining < waitCombat) {
@@ -381,21 +421,11 @@
         continue;
       }
       if (!runtime.enemy) spawnStage(state.stage, true);
-      const dps = estimatedDps();
-      const timeToKill = runtime.enemy.hp / Math.max(1, dps);
-      const allowed = Math.min(remaining, runtime.timer);
-      if (timeToKill <= allowed) {
-        remaining -= timeToKill;
-        runtime.timer -= timeToKill;
-        runtime.enemy.hp = 0;
-        winStage(true);
-      } else {
-        runtime.enemy.hp -= dps * allowed;
-        runtime.timer -= allowed;
-        remaining -= allowed;
-        if (runtime.timer <= 0) { failStage(true); continue; }
-      }
+      const nextEvent = nextCombatEvent(remaining);
+      simulateDetailed(nextEvent);
+      remaining -= nextEvent;
     }
+    runtime.backgroundMode = false;
   }
 
   function heroAttack(i) {
@@ -408,7 +438,7 @@
     if (runtime.enemy.debuff > 0) damage *= 1.16;
     dealDamage(damage, i, crit);
     hero.energy = Math.min(100, hero.energy + 12);
-    setHeroAction(i, "attack");
+    if (!runtime.backgroundMode) setHeroAction(i, "attack");
   }
 
   function castSkill(i) {
@@ -428,8 +458,7 @@
       healHero(targetIndex, power);
       runtime.heroes.forEach(h => { if (h.alive) h.energy = Math.min(100, h.energy + 8); });
     }
-    setHeroAction(i, "skill");
-    emitSkillFx(i, "skill");
+    if (!runtime.backgroundMode) { setHeroAction(i, "skill"); emitSkillFx(i, "skill"); }
   }
 
   function castUltimate(i) {
@@ -445,16 +474,15 @@
       const down = runtime.heroes.findIndex(h => !h.alive);
       if (down >= 0) {
         const stats = heroStats(down); runtime.heroes[down].alive = true; runtime.heroes[down].maxHp = stats.hp; runtime.heroes[down].hp = stats.hp * .45; runtime.heroes[down].shield = stats.hp * .2;
-        setHeroAction(down, "idle"); toast(`徐崇睿以「命运回响」复活了${HERO_DEFS[down].name}`);
+        if (!runtime.backgroundMode) setHeroAction(down, "idle"); toast(`徐崇睿以「命运回响」复活了${HERO_DEFS[down].name}`);
       } else runtime.heroes.forEach((h, idx) => healHero(idx, heroStats(2).heal * 2.8));
     }
-    setHeroAction(i, "ultimate");
-    emitSkillFx(i, "ultimate");
+    if (!runtime.backgroundMode) { setHeroAction(i, "ultimate"); emitSkillFx(i, "ultimate"); }
   }
 
   function enemyAttack() {
     const e = runtime.enemy;
-    setEnemyAction("attack");
+    if (!runtime.backgroundMode) setEnemyAction("attack");
     runtime.enemyAttack += e.boss ? 1.05 : 1.35;
     runtime.bossAttackCount++;
     const alive = runtime.heroes.map((h, i) => h.alive ? i : -1).filter(i => i >= 0);
@@ -469,12 +497,11 @@
       if (state.talents.guardCore) damage *= .88;
       if (target.shield > 0) { const absorbed = Math.min(target.shield, damage); target.shield -= absorbed; damage -= absorbed; }
       target.hp = Math.max(0, target.hp - damage);
-      floatNumber(format(damage), 18 + i * 11, 55, false, false);
-      setHeroAction(i, "hit");
-      if (target.hp <= 0) { target.alive = false; setHeroAction(i, "down"); }
+      if (!runtime.backgroundMode) { floatNumber(format(damage), 18 + i * 11, 55, false, false); setHeroAction(i, "hit"); }
+      if (target.hp <= 0) { target.alive = false; if (!runtime.backgroundMode) setHeroAction(i, "down"); }
     });
     if (e.debuff > 0) e.debuff -= e.boss ? 1.05 : 1.35;
-    dom.enemyUnit.classList.remove("hit");
+    if (!runtime.backgroundMode) dom.enemyUnit.classList.remove("hit");
   }
 
   function dealDamage(amount, heroIndex, crit = false) {
@@ -482,10 +509,12 @@
     const damage = Math.min(runtime.enemy.hp, Math.max(1, amount));
     runtime.enemy.hp -= damage;
     runtime.stats.push({ at: Date.now(), type: "damage", value: damage });
-    if (state.settings.showDamage) floatNumber(format(damage), 72 + Math.random() * 10, 34 + Math.random() * 16, crit, false);
-    emitHitFx(heroIndex, crit);
-    dom.enemyUnit.classList.remove("hit"); void dom.enemyUnit.offsetWidth; dom.enemyUnit.classList.add("hit");
-    if (runtime.enemy.hp <= 0) winStage(false);
+    if (!runtime.backgroundMode && state.settings.showDamage) floatNumber(format(damage), 72 + visualRandom() * 10, 34 + visualRandom() * 16, crit, false);
+    if (!runtime.backgroundMode) {
+      emitHitFx(heroIndex, crit);
+      dom.enemyUnit.classList.remove("hit"); void dom.enemyUnit.offsetWidth; dom.enemyUnit.classList.add("hit");
+    }
+    if (runtime.enemy.hp <= 0) winStage(runtime.backgroundMode);
   }
 
   function healHero(i, amount) {
@@ -494,7 +523,7 @@
     const actual = Math.min(amount, hero.maxHp - hero.hp);
     hero.hp += actual;
     runtime.stats.push({ at: Date.now(), type: "heal", value: actual });
-    if (actual > 0 && state.settings.showDamage) floatNumber(`+${format(actual)}`, 19 + i * 11, 48, false, true);
+    if (!runtime.backgroundMode && actual > 0 && state.settings.showDamage) floatNumber(`+${format(actual)}`, 19 + i * 11, 48, false, true);
   }
 
   function winStage(background = false) {
@@ -560,12 +589,56 @@
   }
 
   function processAutoTrain(dt) {
-    if (!state.autoTrain.enabled || state.bestStage < 500) return;
+    if (!state.autoTrain.enabled) return;
     state.autoTrainClock = (state.autoTrainClock || 0) + dt;
-    if (state.autoTrainClock < 2) return;
+    if (state.autoTrainClock < .35) return;
     state.autoTrainClock = 0;
-    const order = state.autoTrain.priority === "前排生存" ? [0,2,1] : state.autoTrain.priority === "输出伤害" ? [1,0,2] : state.autoTrain.priority === "辅助治疗" ? [2,0,1] : [0,1,2];
-    for (const i of order) if (buyTraining(i, false)) break;
+    processAutomaticGrowth(30);
+  }
+
+  function growthPressure() {
+    const alive = runtime.heroes.filter(hero => hero.alive);
+    const health = alive.length ? alive.reduce((sum, hero) => sum + hero.hp / Math.max(1, hero.maxHp), 0) / alive.length : 0;
+    const enemyRatio = runtime.enemy ? runtime.enemy.hp / Math.max(1, runtime.enemy.maxHp) : 0;
+    return {
+      survival: health < .55 || runtime.heroes.some(hero => !hero.alive),
+      damage: Boolean(state.activeBossStage) || (runtime.timer < 4 && enemyRatio > .2)
+    };
+  }
+
+  function processAutomaticGrowth(limit = 50) {
+    if (!state.autoTrain.enabled) return 0;
+    let purchases = 0;
+    const pressure = growthPressure();
+    while (purchases < limit) {
+      const candidates = [];
+      state.heroes.forEach((hero, heroIndex) => {
+        const roleWeight = pressure.survival ? [1.45, .78, 1.25][heroIndex] : pressure.damage ? [.82, 1.55, 1.05][heroIndex] : [1, 1.12, 1.02][heroIndex];
+        const trainingPrice = trainCost(heroIndex);
+        candidates.push({ type: "training", heroIndex, cost: trainingPrice, score: roleWeight * (.08 + hero.training * .0005) / Math.max(1, trainingPrice) });
+        hero.skillLevels.forEach((level, skillIndex) => {
+          if (skillIndex === 0 || level <= 0) return;
+          const cost = skillCost(heroIndex, skillIndex);
+          const skillWeight = (heroIndex === 1 ? 1.35 : heroIndex === 2 && pressure.survival ? 1.4 : 1) * (skillIndex === 3 ? 1.25 : 1);
+          candidates.push({ type: "skill", heroIndex, skillIndex, cost, score: skillWeight * .06 / Math.max(1, cost) });
+        });
+      });
+      const affordable = candidates.filter(candidate => candidate.cost <= state.gold).sort((a, b) => b.score - a.score)[0];
+      if (!affordable) break;
+      state.gold -= affordable.cost;
+      if (affordable.type === "training") {
+        state.heroes[affordable.heroIndex].training++;
+        state.autoTotals.training++;
+      } else {
+        state.heroes[affordable.heroIndex].skillLevels[affordable.skillIndex]++;
+        state.autoTotals.skills++;
+      }
+      purchases++;
+    }
+    const enhanced = autoEnhanceGear(30);
+    if (purchases || enhanced) refreshPartyStats();
+    if (state.pendingOffline) state.pendingOffline.upgrades = (state.pendingOffline.upgrades || 0) + purchases;
+    return purchases;
   }
 
   function heroStats(i) {
@@ -605,28 +678,65 @@
   function xpNeeded(level) { return 55 * Math.pow(1.145, level - 1); }
   function trainCost(i) { const h = state.heroes[i]; return Math.floor(25 * Math.pow(1.18, h.training) * (1 + i * .04)); }
   function skillCost(i, skill) { const level = state.heroes[i].skillLevels[skill]; return Math.floor(70 * Math.pow(1.42, level) * (1 + skill * .7)); }
-  function buyTraining(i, notify = true) { const cost = trainCost(i); if (state.gold < cost) { if (notify) toast("金币不足", true); return false; } state.gold -= cost; state.heroes[i].training++; resetPartyRuntime(); renderTab(); return true; }
-  function upgradeAll() { let bought = 0; for (let round = 0; round < 50; round++) { const i = state.heroes.map((h,j) => ({j,n:h.training})).sort((a,b)=>a.n-b.n)[0].j; if (!buyTraining(i,false)) break; bought++; } if (!bought) toast("金币不足", true); else toast(`完成${bought}次全队培养`); }
-  function toggleAutoTrain() { if (state.bestStage < 500) { toast("通过第500关后解锁自动培养", true); return; } state.autoTrain.enabled = !state.autoTrain.enabled; toast(state.autoTrain.enabled ? "自动培养已开启" : "自动培养已关闭"); render(); }
+  function buyTraining(i, notify = true) { const cost = trainCost(i); if (state.gold < cost) { if (notify) toast("金币不足", true); return false; } state.gold -= cost; state.heroes[i].training++; state.autoTotals.training++; refreshPartyStats(); renderTab(); return true; }
+  function upgradeAll() { const bought = processAutomaticGrowth(500); if (!bought) toast("金币不足", true); else toast(`自动完成${bought}次成长`); }
+  function toggleAutoTrain() { state.autoTrain.enabled = !state.autoTrain.enabled; toast(state.autoTrain.enabled ? "自动成长已开启" : "自动成长已暂停"); render(); }
 
   function generateGear(guaranteed = false) {
     const stage = runtime.battleStage;
     const slot = ["weapon","armor","relic"][Math.floor(Math.random()*3)];
+    const heroIndex = Math.floor(Math.random() * HERO_DEFS.length);
     const floorRarity = guaranteed ? Math.min(4, Math.floor((stage - 1) / 2000)) : 0;
     const roll = Math.random() * 100;
     let acc = 0, rarityIndex = 0;
     for (let i=0;i<RARITIES.length;i++){acc+=RARITIES[i].weight;if(roll<=acc){rarityIndex=i;break;}}
     rarityIndex = Math.max(floorRarity, rarityIndex);
     const rarity = RARITIES[rarityIndex];
-    const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`, slot, rarity: rarity.name, rarityIndex, base: Math.round((5 + stage * .18) * rarity.mult * (.86 + Math.random() * .28)), enhance: 0, locked: false, stage };
+    const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`, heroIndex, slot, rarity: rarity.name, rarityIndex, base: Math.round((5 + stage * .18) * rarity.mult * (.86 + Math.random() * .28)), enhance: 0, stage };
     if (!state.codex.gear.includes(rarity.name)) state.codex.gear.push(rarity.name);
-    lootBurst(rarityIndex,slot);
-    if (state.autoSalvage[rarity.name]) { state.dust += salvageValue(item); toastMini(`自动分解 ${rarity.name}${SLOT_NAMES[slot]}`, 71, 77); }
-    else { state.bag.unshift(item); toast(`获得${rarity.name}${SLOT_NAMES[slot]}`); }
+    if (!runtime.backgroundMode) lootBurst(rarityIndex,slot);
+    const current = state.heroes[heroIndex].gear[slot];
+    if (!current || gearValue(item) > gearValue(current)) {
+      if (current) state.dust += salvageValue(current);
+      state.heroes[heroIndex].gear[slot] = item;
+      state.autoTotals.equips++;
+      recordAuto(`${HERO_DEFS[heroIndex].name}自动换上${rarity.name}${SLOT_NAMES[slot]}`);
+      if (!runtime.backgroundMode && rarityIndex >= 3) toast(`${HERO_DEFS[heroIndex].name}换上${rarity.name}${SLOT_NAMES[slot]}`);
+    } else {
+      state.dust += salvageValue(item);
+    }
+    state.bag = [];
+    autoEnhanceGear(12);
+    refreshPartyStats();
   }
   function gearValue(g) { return g.base * (1 + g.enhance * .12); }
   function salvageValue(g) { return Math.floor(g.base * .38 + g.enhance * g.base * .08); }
   function enhanceCost(g) { return Math.floor((12 + g.base * .22) * Math.pow(1.22, g.enhance)); }
+
+  function autoEnhanceGear(limit = 30) {
+    let enhanced = 0;
+    while (enhanced < limit) {
+      const candidates = [];
+      state.heroes.forEach((hero, heroIndex) => Object.entries(hero.gear).forEach(([slot, item]) => {
+        if (!item || item.enhance >= 20) return;
+        const cost = enhanceCost(item);
+        const gain = item.base * .12;
+        if (cost <= state.dust) candidates.push({ heroIndex, slot, item, cost, score: gain / Math.max(1, cost) });
+      }));
+      const best = candidates.sort((a, b) => b.score - a.score)[0];
+      if (!best) break;
+      state.dust -= best.cost;
+      best.item.enhance++;
+      state.autoTotals.enhances++;
+      enhanced++;
+    }
+    return enhanced;
+  }
+
+  function recordAuto(message) {
+    state.autoLog.unshift({ at: Date.now(), message });
+    state.autoLog = state.autoLog.slice(0, 30);
+  }
 
   function equipBest(heroIndex) {
     ["weapon","armor","relic"].forEach(slot => {
@@ -687,7 +797,7 @@
     }
     renderHeroes(); renderCombatStats(); renderProgress(); renderSpeed();
     if (drawerOpen && (force || activeTab === "team")) renderTab();
-    dom.bagBadge.textContent = state.bag.length; dom.bagBadge.classList.toggle("hidden", !state.bag.length);
+    if (dom.bagBadge) { dom.bagBadge.textContent = ""; dom.bagBadge.classList.add("hidden"); }
   }
 
   function renderHeroes() {
@@ -700,7 +810,7 @@
         <div class="hero-stats"><span>生命 ${format(r.hp)}/${format(r.maxHp)}</span><span>训练 +${h.training}</span></div>
         <button class="hero-upgrade" data-action="train" data-hero="${i}">培养 · ${format(trainCost(i))}金币</button>
       </article>`}).join("");
-    const autoBtn=$("#autoTrainBtn");autoBtn.classList.toggle("locked",state.bestStage<500);autoBtn.textContent=state.bestStage<500?"自动培养 · 500关解锁":`自动培养 · ${state.autoTrain.enabled?"开启":"关闭"}`;
+    const autoBtn=$("#autoTrainBtn");autoBtn.classList.remove("locked");autoBtn.textContent=`自动成长 · ${state.autoTrain.enabled?"开启":"暂停"}`;
   }
 
   function renderCombatStats(){trimStats();const damage=runtime.stats.filter(x=>x.type==="damage").reduce((s,x)=>s+x.value,0),heal=runtime.stats.filter(x=>x.type==="heal").reduce((s,x)=>s+x.value,0);dom.dps.textContent=format(damage/30);dom.heal.textContent=format(heal/30);}
@@ -717,21 +827,19 @@
     const winChance=Math.round(clamp(100/(1+Math.exp(-(ratio-1)*3)),3,99));
     dom.bossWinChance.textContent=`预计胜率 · ${winChance}%`;
     dom.bossWinChance.style.color=winChance>=70?"var(--good)":winChance>=40?"var(--gold)":"var(--danger)";
-    let target=100,title="第100关 · 篝火重整";if(state.bestStage>=100&&state.bestStage<500){target=500;title="第500关 · 自动培养"}else if(state.bestStage>=500&&state.bestStage<1000){target=1000;title="第1000关 · 四倍速"}else if(state.bestStage>=1000){target=Math.min(MAX_STAGE,Math.ceil((state.bestStage+1)/1000)*1000);title=target===MAX_STAGE?"第10000关 · 永恒篝火":`第${target}关 · 新区域`;}
+    let target=100,title="第100关 · 篝火重整";if(state.bestStage>=100&&state.bestStage<1000){target=1000;title="第1000关 · 四倍速"}else if(state.bestStage>=1000){target=Math.min(MAX_STAGE,Math.ceil((state.bestStage+1)/1000)*1000);title=target===MAX_STAGE?"第10000关 · 永恒篝火":`第${target}关 · 新区域`;}
     const start=target<=100?0:target- (target>=1000?1000:target===500?400:500);const pct=clamp((state.bestStage-start)/(target-start)*100,0,100);dom.milestoneTitle.textContent=title;dom.milestoneBar.style.width=`${pct}%`;dom.milestoneText.textContent=state.bestStage>=MAX_STAGE?"万阶远征已经完成。":`再推进${Math.max(0,target-state.bestStage)}关。`;
   }
-  function renderSpeed(){const max=state.bestStage>=1000?4:state.bestStage>=100?2:1;if(state.speed>max)state.speed=max;$$('[data-speed]').forEach(b=>{const n=Number(b.dataset.speed);b.classList.toggle('locked',n>max);b.classList.toggle('active',n===state.speed);});}
+  function renderSpeed(){const max=state.bestStage>=1000?4:state.bestStage>=100?2:1;if(state.settings.autoMaxSpeed!==false)state.speed=max;else if(state.speed>max)state.speed=max;$$('[data-speed]').forEach(b=>{const n=Number(b.dataset.speed);b.classList.toggle('locked',n>max);b.classList.toggle('active',n===state.speed);});}
 
   function renderTab(){
     if(!dom.tabContent)return;
     if(activeTab==="team")renderTeamTab();
-    if(activeTab==="gear")renderGearTab();
-    if(activeTab==="talent")renderTalentTab();
     if(activeTab==="codex")renderCodexTab();
     if(activeTab==="rebirth")renderRebirthTab();
     if(activeTab==="settings")renderSettingsTab();
   }
-  function renderTeamTab(){dom.tabContent.innerHTML=`<div class="tab-grid">${HERO_DEFS.map((def,i)=>{const h=state.heroes[i],s=heroStats(i);return`<div class="info-card"><h3>${def.name} · ${def.role}</h3><p>攻击 <strong>${format(s.atk)}</strong>　生命 <strong>${format(s.hp)}</strong>　防御 <strong>${format(s.def)}</strong></p>${def.skills.map((name,j)=>`<div class="skill-line"><span>${name} · ${j===0?"基础":`Lv.${h.skillLevels[j]}`}${h.skillLevels[j]===0?`（${[0,10,25,50][j]}级解锁）`:""}</span>${j?`<button class="inline-btn" data-action="skill" data-hero="${i}" data-skill="${j}" ${h.skillLevels[j]===0?"disabled":""}>升级 ${format(skillCost(i,j))}</button>`:""}</div>`).join("")}</div>`}).join("")}</div>`;}
+  function renderTeamTab(){dom.tabContent.innerHTML=`<div class="subheading">自动成长运行中 · 金币会优先投入当前瓶颈</div><div class="tab-grid">${HERO_DEFS.map((def,i)=>{const h=state.heroes[i],s=heroStats(i);return`<div class="info-card"><h3>${def.name} · ${def.role}</h3><p>攻击 <strong>${format(s.atk)}</strong>　生命 <strong>${format(s.hp)}</strong>　防御 <strong>${format(s.def)}</strong></p><p>等级 ${h.level} · 培养 +${h.training}</p>${def.skills.map((name,j)=>`<div class="skill-line"><span>${name}</span><strong>${j===0?"基础技能":h.skillLevels[j]===0?`Lv.${[0,10,25,50][j]}解锁`:`Lv.${h.skillLevels[j]}`}</strong></div>`).join("")}</div>`}).join("")}</div>`;}
   function renderGearTab(){
     const equipped=HERO_DEFS.map((def,i)=>`<div class="gear-column"><h3>${def.name}<button class="inline-btn" style="float:right" data-action="equip-best" data-hero="${i}">一键换装</button></h3>${["weapon","armor","relic"].map(slot=>{const g=state.heroes[i].gear[slot];return`<div class="gear-item"><div class="gear-icon ${g?`rarity-${g.rarity}`:"empty"}" style="${gearIconStyle(slot,g?.rarityIndex||0)}"></div><div>${g?`${g.rarity}${SLOT_NAMES[slot]} +${g.enhance}<small>战力 ${format(gearValue(g))}</small>`:`空${SLOT_NAMES[slot]}`}</div>${g?`<button class="inline-btn" data-action="enhance" data-hero="${i}" data-slot="${slot}">${g.enhance>=20?"已满":`${format(enhanceCost(g))}粉尘`}</button>`:""}</div>`}).join("")}</div>`).join("");
     const bag=state.bag.slice(0,18).map(g=>`<div class="gear-item"><div class="gear-icon rarity-${g.rarity}" style="${gearIconStyle(g.slot,g.rarityIndex)}"></div><div>${g.rarity}${SLOT_NAMES[g.slot]} +${g.enhance}<small>战力 ${format(gearValue(g))} · ${g.locked?"已锁定":"未锁定"}</small></div><span><button class="inline-btn" data-action="lock" data-id="${g.id}">${g.locked?"解锁":"锁定"}</button> <button class="inline-btn" data-action="salvage" data-id="${g.id}">分解</button></span></div>`).join("")||`<p>背包为空。击败敌人会随机获得装备。</p>`;
@@ -741,7 +849,6 @@
   function renderCodexTab(){const entries=[];for(let i=1;i<=100;i++){const stage=i*100,seen=state.codex.bosses.includes(stage);entries.push(`<div class="codex-entry ${seen?"seen":""}"><b>${seen?bossName(stage):"???"}</b><span>第${stage}关</span></div>`)}dom.tabContent.innerHTML=`<div class="subheading">Boss图鉴 · ${state.codex.bosses.length}/100</div><div class="codex-grid">${entries.join("")}</div>`;}
   function renderRebirthTab(){const can=state.bestStage>=100;dom.tabContent.innerHTML=`<div class="settings-grid"><div class="setting-card"><h3>篝火重整</h3><p>返回第1关；重置金币、角色等级、技能等级与培养。装备、图鉴、灵魂余烬、永久天赋和历史最高关卡全部保留。</p><p>本次可获得：<strong>${rebirthReward()} 灵魂余烬</strong></p><button class="primary-btn" style="width:180px" data-action="rebirth-open" ${can?"":"disabled"}>${can?"点燃重整篝火":"第100关后解锁"}</button></div><div class="setting-card"><h3>远征记录</h3><p>历史最高：第${state.bestStage}关</p><p>重整次数：${state.rebirths}</p><p>累计击杀：${format(state.totalKills)}</p><p>当前倍速：${state.speed}×</p></div></div>`;}
   function renderSettingsTab(){
-    const backupReady=Boolean(localStorage.getItem(BACKUP_KEY));
     dom.tabContent.innerHTML=`<div class="settings-grid">
       <div class="setting-card"><h3>界面与性能</h3>
         <p>界面缩放</p><div class="setting-actions">${[90,100,110,125].map(x=>`<button class="inline-btn" data-action="ui-scale" data-value="${x}" ${state.settings.uiScale===x?"disabled":""}>${x}%</button>`).join("")}</div>
@@ -750,9 +857,9 @@
         <div class="setting-row"><span>环境粒子</span><button class="inline-btn" data-action="particles-toggle">${state.settings.particles?"开启":"关闭"}</button></div>
         <div class="setting-row"><span>伤害与治疗数字</span><button class="inline-btn" data-action="damage-toggle">${state.settings.showDamage?"显示":"隐藏"}</button></div>
       </div>
-      <div class="setting-card"><h3>自动规则</h3><p>自动培养优先级</p><div class="setting-actions">${["均衡","前排生存","输出伤害","辅助治疗"].map(x=>`<button class="inline-btn" data-action="priority" data-value="${x}" ${state.autoTrain.priority===x?"disabled":""}>${x}</button>`).join("")}</div><p>自动分解</p><div class="setting-actions">${["普通","稀有","史诗"].map(x=>`<button class="inline-btn rarity-${x}" data-action="auto-salvage" data-value="${x}">${x}：${state.autoSalvage[x]?"开启":"关闭"}</button>`).join("")}</div></div>
-      <div class="setting-card"><h3>存档管理</h3><p>每5秒及重大操作后自动保存，本地存档不会上传。升级前的旧存档会保留一份只读备份。</p><div class="setting-actions"><button class="inline-btn" data-action="save">立即保存</button><button class="inline-btn" data-action="export">导出当前存档</button><button class="inline-btn" data-action="download-backup" ${backupReady?"":"disabled"}>下载升级前备份</button><button class="inline-btn" data-action="import">导入存档</button><button class="inline-btn danger-btn" data-action="clear-open">清空进度</button></div></div>
-      <div class="setting-card"><h3>兼容说明</h3><p>界面版本 v${SAVE_VERSION}。角色、装备、关卡、图鉴与离线收益全部沿用旧存档；关闭网页期间仍只累计金币和经验，不推进关卡。</p><button class="inline-btn" data-action="guide-reset">重新查看操作提示</button></div>
+      <div class="setting-card"><h3>自动规则</h3><div class="setting-row"><span>自动成长</span><button class="inline-btn" data-action="auto-growth-toggle">${state.autoTrain.enabled?"开启":"暂停"}</button></div><div class="setting-row"><span>自动最高倍速</span><button class="inline-btn" data-action="auto-speed-toggle">${state.settings.autoMaxSpeed!==false?"开启":"关闭"}</button></div><p>掉落装备自动比较换装，旧装备自动转化为粉尘；粉尘自动强化收益最高的部位。</p></div>
+      <div class="setting-card"><h3>存档管理</h3><p>每5秒自动保存，本地存档不会上传。v3为全新数值版本，不兼容旧版存档。</p><div class="setting-actions"><button class="inline-btn" data-action="save">立即保存</button><button class="inline-btn" data-action="export">导出当前存档</button><button class="inline-btn" data-action="import">导入v3存档</button><button class="inline-btn danger-btn" data-action="clear-open">清空进度</button></div></div>
+      <div class="setting-card"><h3>挂机规则</h3><p>网页在前台或后台标签页时继续推进关卡；完全关闭网页后只累计金币和经验，单次最多12小时。</p><button class="inline-btn" data-action="guide-reset">重新查看操作提示</button></div>
     </div>`;
   }
 
@@ -783,7 +890,8 @@
     if(action==="motion-toggle"){state.settings.reduceMotion=!state.settings.reduceMotion;applyDisplaySettings();renderTab();saveState();}
     if(action==="particles-toggle"){state.settings.particles=!state.settings.particles;applyDisplaySettings();renderTab();saveState();}
     if(action==="damage-toggle"){state.settings.showDamage=!state.settings.showDamage;renderTab();saveState();}
-    if(action==="download-backup")downloadBackup();
+    if(action==="auto-growth-toggle"){toggleAutoTrain();renderTab();saveState();}
+    if(action==="auto-speed-toggle"){state.settings.autoMaxSpeed=state.settings.autoMaxSpeed===false;renderSpeed();renderTab();saveState();}
     if(action==="guide-close"){state.guide.dismissed=true;dom.guideTip.classList.add("hidden");saveState();}
     if(action==="guide-reset"){state.guide.dismissed=false;showGuide();}
   }
@@ -797,18 +905,8 @@
   }
 
   function showGuide(){
-    dom.guideTip.innerHTML=`战斗会自动进行。使用底部功能栏查看队伍、装备与天赋；Boss失败后可立即重试。<button class="inline-btn" data-action="guide-close">知道了</button>`;
+    dom.guideTip.innerHTML=`战斗、成长、换装和强化都会自动进行。使用底部功能栏查看队伍成长、篝火星图与图鉴。<button class="inline-btn" data-action="guide-close">知道了</button>`;
     dom.guideTip.classList.remove("hidden");
-  }
-
-  function downloadBackup(){
-    const raw=localStorage.getItem(BACKUP_KEY);
-    if(!raw){toast("没有可下载的升级前备份",true);return;}
-    const blob=new Blob([raw],{type:"application/json;charset=utf-8"});
-    const url=URL.createObjectURL(blob),link=document.createElement("a");
-    link.href=url;link.download=`万阶深渊-升级前备份-${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
-    toast("升级前备份已下载");
   }
 
   function updateEnemySprite(){
@@ -880,27 +978,29 @@
 
   function floatNumber(text,x,y,crit=false,heal=false){const el=document.createElement("span");el.className=`float-number ${crit?"crit":""} ${heal?"heal":""}`;el.textContent=text;el.style.left=`${x}%`;el.style.top=`${y}%`;dom.damage.appendChild(el);setTimeout(()=>el.remove(),950);}
   function toastMini(text,x,y){floatNumber(text,x,y,false,true);}
-  function toast(message,bad=false){const el=document.createElement("div");el.className=`toast ${bad?"bad":""}`;el.textContent=message;$("#toastStack").appendChild(el);setTimeout(()=>el.remove(),3200);}
-  function showOfflineReport(r){openModal(`<h2 id="modalTitle">挂机收益</h2><p>网页关闭期间关卡保持在原位，金币与经验按离开时的效率累计。</p><div class="tab-grid"><div class="info-card"><h3>离开时间</h3><strong>${formatDuration(r.seconds)}</strong></div><div class="info-card"><h3>获得金币</h3><strong>${format(r.gold)}</strong></div><div class="info-card"><h3>每人经验</h3><strong>${format(r.xp)}</strong></div></div>`);}
+  function toast(message,bad=false){if(runtime?.backgroundMode)return;const el=document.createElement("div");el.className=`toast ${bad?"bad":""}`;el.textContent=message;$("#toastStack").appendChild(el);setTimeout(()=>el.remove(),3200);}
+  function showOfflineReport(r){openModal(`<h2 id="modalTitle">挂机收益</h2><p>网页关闭期间关卡保持在原位；金币与经验结算后，系统已自动完成最有效的成长。</p><div class="tab-grid"><div class="info-card"><h3>离开时间</h3><strong>${formatDuration(r.seconds)}</strong></div><div class="info-card"><h3>获得金币</h3><strong>${format(r.gold)}</strong></div><div class="info-card"><h3>每人经验</h3><strong>${format(r.xp)}</strong></div><div class="info-card"><h3>自动成长</h3><strong>${format(r.upgrades||0)}次</strong></div></div>${r.seconds>=OFFLINE_CAP-1?'<p>已达到12小时离线储存上限。</p>':''}`);}
   function rebirthModal(){openModal(`<h2 id="modalTitle">点燃重整篝火？</h2><p>关卡、金币、角色等级、技能等级与培养将被重置。装备、图鉴、天赋及最高纪录保留。</p><p>本次获得 <strong>${rebirthReward()} 灵魂余烬</strong></p><button class="primary-btn" data-action="rebirth-confirm">确认重整</button>`);}
   function exportSave(){saveState();const data=btoa(unescape(encodeURIComponent(JSON.stringify(state))));openModal(`<h2 id="modalTitle">导出存档</h2><p>复制下方文本并妥善保存。</p><textarea id="saveText">${data}</textarea><button class="inline-btn" data-action="copy-save">手动复制文本</button>`);const ta=$("#saveText");ta.focus();ta.select();navigator.clipboard?.writeText(data).then(()=>toast("存档已复制到剪贴板")).catch(()=>{});}
   function importSaveModal(){openModal(`<h2 id="modalTitle">导入存档</h2><p>粘贴存档文本。当前进度将在验证成功后被替换。</p><textarea id="saveText" placeholder="在此粘贴存档"></textarea><button class="primary-btn" data-action="import-confirm">验证并导入</button>`);}
-  function importSave(){try{const text=$("#saveText").value.trim();const parsed=JSON.parse(decodeURIComponent(escape(atob(text))));state=mergeState(parsed);saveState();location.reload();}catch(e){toast("存档文本无效",true);}}
+  function importSave(){try{const text=$("#saveText").value.trim();const parsed=JSON.parse(decodeURIComponent(escape(atob(text))));if(parsed.version!==SAVE_VERSION)throw new Error("存档版本不兼容");state=mergeState(parsed);saveState();location.reload();}catch(e){toast("仅支持v3存档",true);}}
   function clearSaveModal(){openModal(`<h2 id="modalTitle">清空全部进度？</h2><p>此操作无法恢复。建议先导出存档。</p><button class="inline-btn danger-btn" data-action="clear-confirm">确认永久清空</button>`);}
   function openModal(html){dom.modalBody.innerHTML=html;dom.modal.classList.remove("hidden");runtime.paused=true;}
   function closeModal(){dom.modal.classList.add("hidden");runtime.paused=false;}
   function format(value){if(!Number.isFinite(value))return"∞";const abs=Math.abs(value);const units=[[1e24,"秭"],[1e20,"垓"],[1e16,"京"],[1e12,"兆"],[1e8,"亿"],[1e4,"万"]];for(const[u,n]of units)if(abs>=u)return`${(value/u).toFixed(abs>=u*100?0:abs>=u*10?1:2)}${n}`;return Math.floor(value).toLocaleString("zh-CN");}
   function formatDuration(sec){sec=Math.floor(sec);const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return`${h?`${h}小时`:""}${m?`${m}分钟`:""}${!h&&s?`${s}秒`:""}`||"0秒";}
   function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+  function visualRandom(){visualRandomState=(1664525*visualRandomState+1013904223)>>>0;return visualRandomState/4294967296;}
 
   if (globalThis.__ABYSS_TEST_MODE__) {
     window.__ABYSS_TEST__ = {
-      snapshot: () => JSON.parse(JSON.stringify({ state, runtime: { battleStage: runtime.battleStage, timer: runtime.timer, retryAt: runtime.retryAt, retryRemaining: runtime.retryRemaining, enemy: runtime.enemy } })),
+      snapshot: () => JSON.parse(JSON.stringify({ state, runtime: { battleStage: runtime.battleStage, timer: runtime.timer, retryAt: runtime.retryAt, retryRemaining: runtime.retryRemaining, enemyAttack: runtime.enemyAttack, enemy: runtime.enemy, heroes: runtime.heroes } })),
       setStage: stage => { state.completed = false; state.stage = clamp(stage, 1, MAX_STAGE); resetPartyRuntime(); spawnStage(state.stage, true); },
       winNow: () => { if (runtime.enemy) { runtime.enemy.hp = 0; winStage(true); } },
       failNow: () => failStage(true),
       retryNow: () => { runtime.retryAt = 0; runtime.retryRemaining = 0; maybeAutoChallenge(); },
       backgroundSeconds: seconds => simulateBackground(seconds * state.speed),
+      detailedSeconds: seconds => simulateForeground(seconds),
       setBestStage: stage => { state.bestStage = clamp(stage, 1, MAX_STAGE); },
       rebirthNow: () => performRebirth()
     };

@@ -247,7 +247,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .primary-btn:hover { filter: brightness(1.08); }
 .ghost-btn { border-color: #34415c; background: #131c2b; color: var(--text); font-size: .66rem; }
 .ghost-btn.locked { opacity: .48; }
-.tab-nav { min-width: 0; display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: .32rem; padding-top: 1.2rem; }
+.tab-nav { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .45rem; padding-top: 1.2rem; }
 .tab-btn { position: relative; min-width: 0; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .tab-btn i { width: 1.75rem; height: 1.75rem; margin: 0 auto .18rem; display: grid; place-items: center; border: 1px solid #303c52; background-color: #101824; color: #c3ccda; font-style: normal; font-size: .65rem; }
 .ui-icon { background-image: url('assets-webp/ui/icons-v2.webp'); background-size: 400% 400%; background-repeat: no-repeat; image-rendering: pixelated; }

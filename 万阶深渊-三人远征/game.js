@@ -165,7 +165,7 @@
   }
 
   function buildSprites() {
-    dom.partySprites.innerHTML = HERO_DEFS.map((hero, i) => `<div class="battle-hero hero-${i}" data-hero="${i}" style="background-image:url('assets/heroes/${hero.id}.png');--hero-color:${hero.color};background-position:0 0"></div>`).join("");
+    dom.partySprites.innerHTML = HERO_DEFS.map((hero, i) => `<div class="battle-hero hero-${i}" data-hero="${i}" style="background-image:url('assets-v2/heroes/${hero.id}-v2.png');--hero-color:${hero.color};background-position:0 0"></div>`).join("");
   }
 
   function bindEvents() {
@@ -337,6 +337,7 @@
       runtime.heroes.forEach(h => { if (h.alive) h.energy = Math.min(100, h.energy + 8); });
     }
     setHeroAction(i, "skill");
+    emitSkillFx(i, "skill");
   }
 
   function castUltimate(i) {
@@ -356,10 +357,12 @@
       } else runtime.heroes.forEach((h, idx) => healHero(idx, heroStats(2).heal * 2.8));
     }
     setHeroAction(i, "ultimate");
+    emitSkillFx(i, "ultimate");
   }
 
   function enemyAttack() {
     const e = runtime.enemy;
+    setEnemyAction("attack");
     runtime.enemyAttack += e.boss ? 1.05 : 1.35;
     runtime.bossAttackCount++;
     const alive = runtime.heroes.map((h, i) => h.alive ? i : -1).filter(i => i >= 0);
@@ -388,6 +391,7 @@
     runtime.enemy.hp -= damage;
     runtime.stats.push({ at: Date.now(), type: "damage", value: damage });
     if (state.settings.showDamage) floatNumber(format(damage), 72 + Math.random() * 10, 34 + Math.random() * 16, crit, false);
+    emitHitFx(heroIndex, crit);
     dom.enemyUnit.classList.remove("hit"); void dom.enemyUnit.offsetWidth; dom.enemyUnit.classList.add("hit");
     if (runtime.enemy.hp <= 0) winStage(false);
   }
@@ -524,6 +528,7 @@
     const rarity = RARITIES[rarityIndex];
     const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`, slot, rarity: rarity.name, rarityIndex, base: Math.round((5 + stage * .18) * rarity.mult * (.86 + Math.random() * .28)), enhance: 0, locked: false, stage };
     if (!state.codex.gear.includes(rarity.name)) state.codex.gear.push(rarity.name);
+    lootBurst(rarityIndex,slot);
     if (state.autoSalvage[rarity.name]) { state.dust += salvageValue(item); toastMini(`自动分解 ${rarity.name}${SLOT_NAMES[slot]}`, 71, 77); }
     else { state.bag.unshift(item); toast(`获得${rarity.name}${SLOT_NAMES[slot]}`); }
   }
@@ -595,7 +600,7 @@
     dom.heroCards.innerHTML = HERO_DEFS.map((def,i)=>{
       const h=state.heroes[i],r=runtime.heroes[i],s=heroStats(i),xpPct=h.xp/xpNeeded(h.level)*100;
       return `<article class="hero-card ${def.roleClass}" data-action="open-hero" data-hero="${i}" title="点击查看详情 · 攻击 ${format(s.atk)} · 防御 ${format(s.def)} · 暴击 ${(s.crit*100).toFixed(1)}%">
-        <div class="hero-avatar" style="background-image:url('assets/heroes/${def.id}.png')"></div>
+        <div class="hero-avatar" style="background-image:url('assets-v2/heroes/${def.id}-v2.png')"></div>
         <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level">Lv.${h.level}</span>
         <div class="mini-bars"><div class="mini-track"><div class="mini-fill hp" style="width:${r.alive?r.hp/r.maxHp*100:0}%"></div></div><div class="mini-track"><div class="mini-fill energy" style="width:${r.energy}%"></div></div></div>
         <div class="hero-stats"><span>生命 ${format(r.hp)}/${format(r.maxHp)}</span><span>训练 +${h.training}</span></div>
@@ -714,14 +719,58 @@
 
   function updateEnemySprite(){
     const e=runtime.enemy;if(!e)return;
-    const file=e.boss?`assets/bosses/family-${String(e.zoneIndex+1).padStart(2,"0")}.png`:`assets/enemies/zone-${String(e.zoneIndex+1).padStart(2,"0")}.png`;
-    setAtlasPosition(dom.enemySprite,file,e.boss?e.evo:e.enemyType,e.boss?5:3,e.boss?2:1);
+    dom.enemyUnit.classList.toggle("final-boss",e.boss&&runtime.battleStage===MAX_STAGE);
+    if(e.boss){
+      const file=`assets/bosses/family-${String(e.zoneIndex+1).padStart(2,"0")}.png`;
+      dom.enemySprite.classList.remove("enemy-animated","enemy-attacking");
+      setAtlasPosition(dom.enemySprite,file,e.evo,5,2);
+    }else{
+      const file=`assets-v2/enemies/zone-${String(e.zoneIndex+1).padStart(2,"0")}-v2.png`;
+      dom.enemySprite.style.backgroundImage=`url('${file}')`;
+      dom.enemySprite.style.backgroundSize="400% 600%";
+      dom.enemySprite.classList.add("enemy-animated");
+      setEnemyAction("idle");
+    }
     dom.enemyUnit.style.width=e.boss?"clamp(260px,16vw,390px)":e.elite?"clamp(205px,12vw,290px)":"clamp(175px,10vw,250px)";
     dom.enemyUnit.style.height=e.boss?"clamp(270px,30vh,420px)":e.elite?"clamp(210px,24vh,320px)":"clamp(180px,21vh,290px)";
+  }
+
+  function setEnemyAction(action){
+    const e=runtime.enemy;if(!e)return;
+    if(e.boss){
+      if(action==="attack"){
+        dom.enemyUnit.classList.remove("boss-attacking");void dom.enemyUnit.offsetWidth;dom.enemyUnit.classList.add("boss-attacking");
+        dom.battlefield.classList.remove("camera-kick");void dom.battlefield.offsetWidth;dom.battlefield.classList.add("camera-kick");
+        setTimeout(()=>{dom.enemyUnit.classList.remove("boss-attacking");dom.battlefield.classList.remove("camera-kick");},runtime.battleStage===MAX_STAGE?760:480);
+      }
+      return;
+    }
+    const row=e.enemyType*2+(action==="attack"?1:0);
+    dom.enemySprite.style.backgroundPosition=`0% ${row/5*100}%`;
+    dom.enemySprite.classList.toggle("enemy-attacking",action==="attack");
+    if(action==="attack")setTimeout(()=>{if(runtime.enemy&&!runtime.enemy.boss){dom.enemySprite.style.backgroundPosition=`0% ${(runtime.enemy.enemyType*2)/5*100}%`;dom.enemySprite.classList.remove("enemy-attacking");}},460/state.speed);
   }
   function setAtlasPosition(el,url,index,cols,rows){const col=index%cols,row=Math.floor(index/cols);el.style.backgroundImage=`url('${url}')`;el.style.backgroundSize=`${cols*100}% ${rows*100}%`;el.style.backgroundPosition=`${cols===1?0:col/(cols-1)*100}% ${rows===1?0:row/(rows-1)*100}%`;}
   function gearIconStyle(slot,rarityIndex=0){const col={weapon:0,armor:1,relic:2}[slot]??0,row=clamp(rarityIndex,0,4);return`background-image:url('assets/ui/equipment.png');background-size:300% 500%;background-position:${col/2*100}% ${row/4*100}%`;}
   function setHeroAction(i,action){const el=$(`[data-hero="${i}"].battle-hero`);if(!el)return;el.style.backgroundPositionY=`${ACTION_ROWS[action]/6*100}%`;el.classList.remove("action-attack","action-skill","action-hit","down");if(action==="attack")el.classList.add("action-attack");if(action==="skill"||action==="ultimate")el.classList.add("action-skill");if(action==="hit")el.classList.add("action-hit");if(action==="down")el.classList.add("down");if(action!=="down")setTimeout(()=>{if(runtime.heroes[i].alive){el.style.backgroundPositionY="0%";el.classList.remove("action-attack","action-skill","action-hit")}},550/state.speed);}
+  function emitSkillFx(heroIndex,type){
+    if(state.settings.particles===false)return;
+    const el=document.createElement("div");
+    el.className=`skill-fx fx-hero-${heroIndex} ${type}`;
+    el.innerHTML=Array.from({length:type==="ultimate"?8:5},()=>"<i></i>").join("");
+    dom.fx.appendChild(el);setTimeout(()=>el.remove(),type==="ultimate"?950:650);
+  }
+  function emitHitFx(heroIndex,crit){
+    if(state.settings.particles===false)return;
+    const el=document.createElement("i");el.className=`hit-spark hit-hero-${heroIndex} ${crit?"crit":""}`;
+    dom.fx.appendChild(el);setTimeout(()=>el.remove(),420);
+  }
+  function lootBurst(rarityIndex,slot){
+    if(state.settings.particles===false)return;
+    const el=document.createElement("div");el.className=`loot-burst loot-rarity-${rarityIndex}`;
+    el.innerHTML=`<b style="${gearIconStyle(slot,rarityIndex)}"></b>${Array.from({length:7},()=>"<i></i>").join("")}`;
+    dom.fx.appendChild(el);setTimeout(()=>el.remove(),1100);
+  }
   function showBossIntro(stage){dom.bossTitle.textContent=bossName(stage);dom.bossIntro.classList.remove("hidden");setTimeout(()=>dom.bossIntro.classList.add("hidden"),2800/state.speed);}
   function discoverEnemy(){const e=runtime.enemy;if(e.boss)return;const id=`${e.zoneIndex}-${e.enemyType}`;if(!state.codex.enemies.includes(id))state.codex.enemies.push(id);}
   function bossName(stage){const zone=ZONES[zoneOf(stage)],evo=bossEvolution(stage);return `${zone.boss} · ${EVOLUTIONS[evo]}`;}

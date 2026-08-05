@@ -28,6 +28,11 @@ const expected = [
   ...Array.from({ length: 10 }, (_, i) => `assets/bosses/family-${String(i + 1).padStart(2, "0")}.png`),
   "assets/ui/equipment.png"
 ];
+const expectedV2 = [
+  ...["yutong", "wangshang", "chongrui"].map(x => `assets-v2/heroes/${x}-v2.png`),
+  ...Array.from({ length: 10 }, (_, i) => `assets-v2/enemies/zone-${String(i + 1).padStart(2, "0")}-v2.png`),
+  "assets-v2/ui/icons-v2.png"
+];
 
 function pngInfo(file) {
   const data = fs.readFileSync(path.join(root, file));
@@ -46,10 +51,22 @@ for (const file of expected) {
   if (!file.includes("backgrounds")) ok([4, 6].includes(info.colorType), `${file} 缺少透明通道`);
 }
 
+for (const file of expectedV2) {
+  const full = path.join(root, file);
+  ok(fs.existsSync(full), `缺少 v2 素材：${file}`);
+  if (!fs.existsSync(full)) continue;
+  const info = pngInfo(file);
+  totalBytes += info.bytes;
+  ok([4, 6].includes(info.colorType), `${file} 缺少透明通道`);
+  if (file.includes("heroes")) ok(info.width === 948 && info.height === 1659, `${file} 不是 4×7 英雄图集`);
+  if (file.includes("enemies")) ok(info.width === 1024 && info.height === 1536, `${file} 不是 4×6 敌人图集`);
+  if (file.includes("assets-v2/ui/")) ok(info.width === info.height, `${file} 不是正方形 UI 图集`);
+}
+
 if (errors.length) {
   console.error(errors.map(x => `- ${x}`).join("\n"));
   process.exit(1);
 }
-const finalAssetCount = expected.length;
+const finalAssetCount = expected.length + expectedV2.length;
 console.log(`验证通过：${finalAssetCount} 个最终生成素材，合计 ${(totalBytes / 1024 / 1024).toFixed(1)} MB。`);
 console.log("规则通过：10000 关、每 100 关 Boss、12 小时关闭收益、后台补算与 Boss 自动重试。");

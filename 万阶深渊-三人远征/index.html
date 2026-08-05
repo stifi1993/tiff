@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b14">
+  <title>万阶深渊：三人远征</title>
+  <meta name="description" content="火炬不灭，远征不止。挑战10000关地下城的自动战斗放置RPG。">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="game-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <div><h1>万阶深渊</h1><p>三人远征 · 火炬不灭，远征不止</p></div>
+      </div>
+      <div class="resource-strip" aria-label="资源">
+        <div class="resource"><span>关卡</span><strong id="stageValue">1 / 10000</strong></div>
+        <div class="resource gold"><span>金币</span><strong id="goldValue">0</strong></div>
+        <div class="resource dust"><span>粉尘</span><strong id="dustValue">0</strong></div>
+        <div class="resource ember"><span>余烬</span><strong id="emberValue">0</strong></div>
+      </div>
+      <div class="speed-group" aria-label="战斗速度">
+        <button class="speed-btn active" data-speed="1">1×</button>
+        <button class="speed-btn locked" data-speed="2">2×</button>
+        <button class="speed-btn locked" data-speed="4">4×</button>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <aside class="party-panel panel">
+        <div class="panel-heading"><span>远征小队</span><small id="teamPower">战力 0</small></div>
+        <div id="heroCards" class="hero-cards"></div>
+        <div class="party-actions">
+          <button id="upgradeAllBtn" class="primary-btn">全队升级</button>
+          <button id="autoTrainBtn" class="ghost-btn locked">自动培养 · 500关解锁</button>
+        </div>
+      </aside>
+
+      <section class="battle-column">
+        <div class="zone-banner">
+          <div><span id="zoneIndex">区域 01</span><h2 id="zoneName">苔痕地窟</h2></div>
+          <div class="stage-marks"><span id="eliteMark"></span><span id="bossMark"></span></div>
+        </div>
+        <div id="battlefield" class="battlefield zone-1">
+          <div class="dungeon-depth"></div>
+          <div class="torch torch-left"></div><div class="torch torch-right"></div>
+          <div id="partySprites" class="party-sprites"></div>
+          <div id="enemyUnit" class="enemy-unit">
+            <div id="enemySprite" class="enemy-sprite"></div>
+            <div class="enemy-shadow"></div>
+          </div>
+          <div id="fxLayer" class="fx-layer" aria-hidden="true"></div>
+          <div id="damageLayer" class="damage-layer" aria-live="polite"></div>
+          <div id="bossIntro" class="boss-intro hidden"><small>深渊领主苏醒</small><strong id="bossTitle">苔岩巨魔 · 初生体</strong></div>
+          <div id="victoryOverlay" class="victory-overlay hidden">
+            <span>永恒篝火已点燃</span><h2>万阶远征 · 完成</h2><p>三人的名字已刻入深渊尽头。</p>
+          </div>
+        </div>
+        <div class="combat-hud panel">
+          <div class="enemy-info">
+            <div class="enemy-title-row"><strong id="enemyName">洞穴黏怪</strong><span id="timerValue">12.0s</span></div>
+            <div class="hp-track"><div id="enemyHpBar" class="hp-fill enemy-hp"></div></div>
+            <div class="enemy-meta"><span id="enemyHpText">100 / 100</span><span id="enemyTraits">普通</span></div>
+          </div>
+          <div class="combat-stats">
+            <div><span>近30秒伤害</span><strong id="dpsValue">0</strong></div>
+            <div><span>近30秒治疗</span><strong id="healValue">0</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="progress-panel panel">
+        <div class="panel-heading"><span>远征进度</span><small id="saveState">已保存</small></div>
+        <div class="boss-card">
+          <div class="boss-card-top"><span>下一位守关者</span><b id="nextBossStage">第100关</b></div>
+          <div class="boss-portrait" id="bossPortrait"></div>
+          <h3 id="nextBossName">苔岩巨魔 · 初生体</h3>
+          <p id="nextBossDesc">盘踞在潮湿石窟中的远古巨兽。</p>
+          <div class="retry-line"><span id="retryText">尚未遭遇</span><button id="challengeBtn" class="small-btn" disabled>立即挑战</button></div>
+        </div>
+        <div class="drop-preview">
+          <div class="subheading">本区掉落</div>
+          <div class="drop-slots" id="dropPreview"></div>
+        </div>
+        <div class="milestone-box">
+          <div class="subheading">下一里程碑</div>
+          <strong id="milestoneTitle">第100关 · 篝火重整</strong>
+          <div class="milestone-track"><div id="milestoneBar"></div></div>
+          <p id="milestoneText">再推进99关解锁重生。</p>
+        </div>
+      </aside>
+    </main>
+
+    <section class="bottom-dock panel">
+      <nav class="tab-nav" aria-label="功能面板">
+        <button class="tab-btn active" data-tab="team">队伍</button>
+        <button class="tab-btn" data-tab="gear">装备 <span id="bagBadge" class="badge hidden">0</span></button>
+        <button class="tab-btn" data-tab="talent">天赋</button>
+        <button class="tab-btn" data-tab="codex">图鉴</button>
+        <button class="tab-btn" data-tab="rebirth">篝火重整</button>
+        <button class="tab-btn" data-tab="settings">设置</button>
+      </nav>
+      <div id="tabContent" class="tab-content"></div>
+    </section>
+  </div>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card"><button id="modalClose" class="modal-close" aria-label="关闭">×</button><div id="modalBody"></div></div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

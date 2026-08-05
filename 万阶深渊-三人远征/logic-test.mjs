@@ -133,6 +133,7 @@ const longStart = Date.now();
 longBackground.backgroundSeconds(3600);
 assert.ok(Date.now() - longStart < 5000, "一小时后台补算必须在5秒内完成");
 assert.ok(longBackground.snapshot().state.totalKills > 0, "长时间后台补算必须实际执行战斗");
+assert.ok(longBackground.snapshot().state.autoLog.some(entry => entry.message.includes("自动成长")), "自动培养与强化必须汇总到远征记录");
 
 const autoRebirth = createContext({ version: 3, stage: 500, bestStage: 500, gold: 0, lastSavedAt: Date.now() }, "abyss-expedition-v3", 99);
 autoRebirth.setBestStage(500);

@@ -205,6 +205,16 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .combat-metrics div { min-width: 5.8rem; } .combat-metrics div:last-child { text-align: right; }
 .combat-metrics span { display: block; color: var(--muted); font-size: .55rem; } .combat-metrics strong { color: var(--gold-bright); font-size: .82rem; }
 .combat-metrics i { width: 1px; height: 1.6rem; margin: 0 .8rem; background: #354158; }
+.auto-feed { position: absolute; left: 1rem; top: 1rem; z-index: 11; width: min(22rem,24vw); padding: .48rem .58rem; overflow: hidden; }
+.auto-feed header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .28rem; color: var(--gold); font-size: .58rem; letter-spacing: .1em; }
+.auto-feed header button { border: 0; background: transparent; color: var(--muted); font-size: .52rem; cursor: pointer; }
+.auto-feed-list { display: grid; gap: .18rem; max-height: 4rem; overflow: hidden; }
+.auto-feed.expanded { max-height: min(30rem,60vh); background: rgba(7,11,18,.96); }
+.auto-feed.expanded .auto-feed-list { max-height: min(26rem,52vh); overflow: auto; }
+.auto-feed-list p { display: grid; grid-template-columns: 2.8rem minmax(0,1fr); gap: .35rem; margin: 0; color: var(--muted); font-size: .53rem; line-height: 1.35; }
+.auto-feed-list p.important { color: var(--gold-bright); }
+.auto-feed-list time { color: #617089; font-variant-numeric: tabular-nums; }
+.auto-feed-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .boss-intro { position: absolute; inset: 0; z-index: 20; display: grid; place-content: center; text-align: center; background: linear-gradient(90deg, transparent, rgba(29,4,13,.88), transparent); animation: intro 2.8s forwards; }
 .boss-intro small { color: #f07073; letter-spacing: .38em; } .boss-intro strong { margin-top: .5rem; font-family: Georgia,"Microsoft YaHei",serif; font-size: 1.9rem; letter-spacing: .18em; }
 @keyframes intro { 0%, 100% { opacity: 0; } 15%, 80% { opacity: 1; } }
@@ -239,7 +249,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .mini-track { height: .34rem; overflow: hidden; border: 1px solid #222c3e; background: #05080d; }
 .mini-fill { height: 100%; transition: width .18s; } .mini-fill.hp { background: linear-gradient(90deg,#9f2942,#ef6572); } .mini-fill.energy { background: linear-gradient(90deg,#425fbc,#86adff); }
 .hero-stats { display: flex; justify-content: space-between; gap: .4rem; overflow: hidden; color: var(--muted); font-size: .52rem; white-space: nowrap; }
-.hero-upgrade { width: 100%; height: 1.35rem; margin-top: .28rem; border: 1px solid #3b4864; background: #1a2435; color: var(--text); font-size: .56rem; cursor: pointer; }
+.hero-upgrade { width: 100%; height: 1.35rem; margin-top: .28rem; border: 1px solid #3b4864; background: #1a2435; color: var(--text); font-size: .56rem; cursor: default; display: grid; place-items: center; }
 .hero-upgrade:hover { border-color: var(--gold); color: var(--gold-bright); }
 .quick-actions { display: grid; grid-template-rows: 1fr 1fr; gap: .45rem; padding-top: 1.2rem; }
 .primary-btn, .ghost-btn { min-height: 2.1rem; border: 1px solid #74582b; cursor: pointer; }

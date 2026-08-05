@@ -14,11 +14,14 @@ const js = read("game.js");
 ok(html.includes("万阶深渊"), "HTML 缺少游戏标题");
 ok(html.includes('src="game.js"'), "HTML 未引用 game.js");
 ok(html.includes('href="styles.css"'), "HTML 未引用 styles.css");
+ok((html.match(/class="tab-btn"/g) || []).length === 4, "底部功能入口不是精简后的 4 个");
+ok(html.includes('id="autoFeed"') && html.includes('id="autoFeedList"'), "缺少主界面自动成长记录");
 ok(js.includes("const MAX_STAGE = 10000"), "关卡上限不是 10000");
 ok(js.includes("stage % 100 === 0"), "缺少每 100 关 Boss 规则");
 ok(js.includes("const OFFLINE_CAP = 12 * 60 * 60"), "离线收益上限不是 12 小时");
 ok(js.includes("state.bestStage = Math.max(state.bestStage, runtime.battleStage)"), "最高通关记录存在偏移风险");
 ok(js.includes("maybeAutoChallenge()"), "缺少 Boss 自动重试入口");
+ok(js.includes("function renderAutoFeed") && js.includes("function flushAutoSummary"), "缺少自动日志汇总与增量渲染");
 ok(css.includes("image-rendering:pixelated"), "缺少像素图无模糊渲染规则");
 
 const expected = [

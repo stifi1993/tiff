@@ -135,6 +135,8 @@
       enemy: null, timer: 12, enemyAttack: 1.2, bossAttackCount: 0, retryAt: 0, retryRemaining: 0,
       battleStage: state.stage, stats: [], paused: false, pendingSpawn: false,
       backgroundMode: false,
+      autoFeedExpanded: false, autoFeedSignature: "",
+      autoSummary: { elapsed: 0, training: 0, skills: 0, enhances: 0 },
       heroes: HERO_DEFS.map(() => ({ hp: 1, maxHp: 1, energy: 0, attackCd: .2 + Math.random() * .5, skillCd: 2.2, shield: 0, alive: true }))
     };
     return r;
@@ -155,8 +157,10 @@
       sideDrawer: $("#sideDrawer"), drawerTitle: $("#drawerTitle"), drawerClose: $("#drawerClose"), drawerScrim: $("#drawerScrim"),
       bossWinChance: $("#bossWinChance"), guideTip: $("#guideTip")
     });
+    dom.autoFeed = $("#autoFeed"); dom.autoFeedList = $("#autoFeedList");
     applyDisplaySettings();
     if (state.pendingOffline) processAutomaticGrowth(5000);
+    if (!state.autoLog.length) recordAuto("三人远征已经启程", true);
     buildSprites();
     bindEvents();
     spawnStage(state.stage, true);
@@ -277,6 +281,7 @@
     });
     $("#upgradeAllBtn").addEventListener("click", () => {
       const bought = processAutomaticGrowth(500);
+      flushAutoSummary(true);
       toast(bought ? `自动完成${bought}次成长` : "当前资源不足");
       render(true);
     });
@@ -286,7 +291,10 @@
     dom.drawerScrim.addEventListener("click", closeDrawer);
     $("#modalClose").addEventListener("click", closeModal);
     dom.modal.addEventListener("click", e => { if (e.target === dom.modal) closeModal(); });
-    window.addEventListener("keydown", e => { if (e.key === "Escape") { if (!dom.modal.classList.contains("hidden")) closeModal(); else closeDrawer(); } });
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape") { if (!dom.modal.classList.contains("hidden")) closeModal(); else closeDrawer(); }
+      if ((e.key === "Enter" || e.key === " ") && e.target?.classList?.contains("hero-card")) { e.preventDefault(); openDrawer("team"); }
+    });
   }
 
   function openDrawer(tab = "team") {
@@ -542,7 +550,7 @@
     state.heroes.forEach(h => addXpRaw(h, xp));
     if (defeated.boss) {
       const first = !state.codex.bosses.includes(runtime.battleStage);
-      if (first) { state.codex.bosses.push(runtime.battleStage); state.embers += 2 + Math.floor(runtime.battleStage / 500); generateGear(true); toast(`首胜！获得灵魂余烬与保底装备`); }
+      if (first) { state.codex.bosses.push(runtime.battleStage); state.embers += 2 + Math.floor(runtime.battleStage / 500); generateGear(true); recordAuto(`首胜 ${bossName(runtime.battleStage)} · 第${runtime.battleStage}关`, true); toast(`首胜！获得灵魂余烬与保底装备`); }
       else if (Math.random() < .08) generateGear(false);
     } else if (Math.random() < (.075 * bonfireMultiplier("gear"))) generateGear(false);
     if (defeated.boss) state.bonfire.bossFailures = 0;
@@ -598,6 +606,8 @@
   function processAutoTrain(dt) {
     if (!state.autoTrain.enabled) return;
     state.autoTrainClock = (state.autoTrainClock || 0) + dt;
+    runtime.autoSummary.elapsed += dt;
+    if (runtime.autoSummary.elapsed >= 30) flushAutoSummary();
     if (state.autoTrainClock < .35) return;
     state.autoTrainClock = 0;
     processAutomaticGrowth(30);
@@ -615,7 +625,7 @@
 
   function processAutomaticGrowth(limit = 50) {
     if (!state.autoTrain.enabled) return 0;
-    let purchases = 0;
+    let purchases = 0, trainingBought = 0, skillsBought = 0;
     const pressure = growthPressure();
     while (purchases < limit) {
       const candidates = [];
@@ -636,13 +646,18 @@
       if (affordable.type === "training") {
         state.heroes[affordable.heroIndex].training++;
         state.autoTotals.training++;
+        trainingBought++;
       } else {
         state.heroes[affordable.heroIndex].skillLevels[affordable.skillIndex]++;
         state.autoTotals.skills++;
+        skillsBought++;
       }
       purchases++;
     }
     const enhanced = autoEnhanceGear(30);
+    runtime.autoSummary.training += trainingBought;
+    runtime.autoSummary.skills += skillsBought;
+    runtime.autoSummary.enhances += enhanced;
     if (purchases || enhanced) refreshPartyStats();
     if (state.pendingOffline) state.pendingOffline.upgrades = (state.pendingOffline.upgrades || 0) + purchases;
     return purchases;
@@ -708,13 +723,14 @@
       if (current) state.dust += salvageValue(current);
       state.heroes[heroIndex].gear[slot] = item;
       state.autoTotals.equips++;
-      recordAuto(`${HERO_DEFS[heroIndex].name}自动换上${rarity.name}${SLOT_NAMES[slot]}`);
+      recordAuto(`${HERO_DEFS[heroIndex].name}自动换上${rarity.name}${SLOT_NAMES[slot]}`, rarityIndex >= 3);
       if (!runtime.backgroundMode && rarityIndex >= 3) toast(`${HERO_DEFS[heroIndex].name}换上${rarity.name}${SLOT_NAMES[slot]}`);
     } else {
       state.dust += salvageValue(item);
     }
     state.bag = [];
-    autoEnhanceGear(12);
+    const enhanced = autoEnhanceGear(12);
+    runtime.autoSummary.enhances += enhanced;
     refreshPartyStats();
   }
   function gearValue(g) { return g.base * (1 + g.enhance * .12); }
@@ -741,9 +757,22 @@
     return enhanced;
   }
 
-  function recordAuto(message) {
-    state.autoLog.unshift({ at: Date.now(), message });
+  function recordAuto(message, important = false) {
+    state.autoLog.unshift({ at: Date.now(), message, important });
     state.autoLog = state.autoLog.slice(0, 30);
+  }
+
+  function flushAutoSummary(force = false) {
+    const summary = runtime.autoSummary;
+    const total = summary.training + summary.skills + summary.enhances;
+    if (total && (force || summary.elapsed >= 30)) {
+      const parts = [];
+      if (summary.training) parts.push(`培养×${summary.training}`);
+      if (summary.skills) parts.push(`技能升级×${summary.skills}`);
+      if (summary.enhances) parts.push(`强化×${summary.enhances}`);
+      recordAuto(`自动成长：${parts.join("、")}`);
+    }
+    runtime.autoSummary = { elapsed: 0, training: 0, skills: 0, enhances: 0 };
   }
 
   function equipBest(heroIndex) {
@@ -848,25 +877,49 @@
       dom.enemyTraits.textContent = enemy.boss ? `Boss · 进化${enemy.evo+1}` : enemy.elite ? "精英 · 强化掉落" : "普通";
       dom.timer.textContent = `${Math.max(0,runtime.timer).toFixed(1)}s`;
     }
-    renderHeroes(); renderCombatStats(); renderProgress(); renderSpeed();
-    if (drawerOpen && (force || activeTab === "team")) renderTab();
+    renderHeroes(); renderCombatStats(); renderProgress(); renderSpeed(); renderAutoFeed();
+    if (drawerOpen && force) renderTab();
     if (dom.bagBadge) { dom.bagBadge.textContent = ""; dom.bagBadge.classList.add("hidden"); }
   }
 
   function renderHeroes() {
-    dom.heroCards.innerHTML = HERO_DEFS.map((def,i)=>{
-      const h=state.heroes[i],r=runtime.heroes[i],s=heroStats(i),xpPct=h.xp/xpNeeded(h.level)*100;
-      return `<article class="hero-card ${def.roleClass}" data-action="open-hero" data-hero="${i}" title="点击查看详情 · 攻击 ${format(s.atk)} · 防御 ${format(s.def)} · 暴击 ${(s.crit*100).toFixed(1)}%">
+    if (globalThis.__ABYSS_TEST_MODE__) return;
+    if (dom.heroCards.dataset.ready !== "true") {
+      dom.heroCards.innerHTML = HERO_DEFS.map((def,i)=>`<article class="hero-card ${def.roleClass}" data-action="open-hero" data-hero="${i}" tabindex="0" role="button">
         <div class="hero-avatar" style="background-image:url('assets-v3/heroes/${def.id}/idle-1.webp')"></div>
-        <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level">Lv.${h.level}</span>
-        <div class="mini-bars"><div class="mini-track"><div class="mini-fill hp" style="width:${r.alive?r.hp/r.maxHp*100:0}%"></div></div><div class="mini-track"><div class="mini-fill energy" style="width:${r.energy}%"></div></div></div>
-        <div class="hero-stats"><span>生命 ${format(r.hp)}/${format(r.maxHp)}</span><span>训练 +${h.training}</span></div>
-        <button class="hero-upgrade" data-action="train" data-hero="${i}">培养 · ${format(trainCost(i))}金币</button>
-      </article>`}).join("");
+        <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level"></span>
+        <div class="mini-bars"><div class="mini-track"><div class="mini-fill hp"></div></div><div class="mini-track"><div class="mini-fill energy"></div></div></div>
+        <div class="hero-stats"><span data-ui="health"></span><span data-ui="training"></span></div>
+        <div class="hero-upgrade" data-ui="next-cost"></div>
+      </article>`).join("");
+      dom.heroCards.dataset.ready = "true";
+    }
+    HERO_DEFS.forEach((def,i)=>{
+      const card=dom.heroCards.querySelector(`.hero-card[data-hero="${i}"]`),h=state.heroes[i],r=runtime.heroes[i],s=heroStats(i);
+      card.title=`点击查看详情 · 攻击 ${format(s.atk)} · 防御 ${format(s.def)} · 暴击 ${(s.crit*100).toFixed(1)}%`;
+      card.querySelector(".hero-level").textContent=`Lv.${h.level}`;
+      card.querySelector(".mini-fill.hp").style.width=`${r.alive?r.hp/r.maxHp*100:0}%`;
+      card.querySelector(".mini-fill.energy").style.width=`${r.energy}%`;
+      card.querySelector('[data-ui="health"]').textContent=`生命 ${format(r.hp)}/${format(r.maxHp)}`;
+      card.querySelector('[data-ui="training"]').textContent=`培养 +${h.training}`;
+      card.querySelector('[data-ui="next-cost"]').textContent=`下次自动培养 · ${format(trainCost(i))}金币`;
+    });
     const autoBtn=$("#autoTrainBtn");autoBtn.classList.remove("locked");autoBtn.textContent=`自动成长 · ${state.autoTrain.enabled?"开启":"暂停"}`;
   }
 
   function renderCombatStats(){trimStats();const damage=runtime.stats.filter(x=>x.type==="damage").reduce((s,x)=>s+x.value,0),heal=runtime.stats.filter(x=>x.type==="heal").reduce((s,x)=>s+x.value,0);dom.dps.textContent=format(damage/30);dom.heal.textContent=format(heal/30);}
+  function renderAutoFeed(){
+    if(!dom.autoFeed||globalThis.__ABYSS_TEST_MODE__)return;
+    const visible=state.autoLog.slice(0,runtime.autoFeedExpanded?30:3);
+    const signature=JSON.stringify([runtime.autoFeedExpanded,visible]);
+    if(signature===runtime.autoFeedSignature)return;
+    runtime.autoFeedSignature=signature;
+    dom.autoFeed.classList.toggle("expanded",runtime.autoFeedExpanded);
+    const toggle=dom.autoFeed.querySelector('[data-action="auto-feed-toggle"]');
+    toggle.textContent=runtime.autoFeedExpanded?"收起":"展开";
+    toggle.setAttribute("aria-expanded",String(runtime.autoFeedExpanded));
+    dom.autoFeedList.innerHTML=visible.map(entry=>`<p class="${entry.important?"important":""}"><time>${new Date(entry.at).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}</time><span>${entry.message}</span></p>`).join("");
+  }
   function trimStats(){const cutoff=Date.now()-30000;runtime.stats=runtime.stats.filter(x=>x.at>=cutoff);}
 
   function renderProgress(){
@@ -946,6 +999,7 @@
     if(action==="auto-growth-toggle"){toggleAutoTrain();renderTab();saveState();}
     if(action==="auto-speed-toggle"){state.settings.autoMaxSpeed=state.settings.autoMaxSpeed===false;renderSpeed();renderTab();saveState();}
     if(action==="auto-rebirth-toggle"){state.bonfire.autoRebirth=!state.bonfire.autoRebirth;renderTab();saveState();}
+    if(action==="auto-feed-toggle"){runtime.autoFeedExpanded=!runtime.autoFeedExpanded;runtime.autoFeedSignature="";renderAutoFeed();}
     if(action==="guide-close"){state.guide.dismissed=true;dom.guideTip.classList.add("hidden");saveState();}
     if(action==="guide-reset"){state.guide.dismissed=false;showGuide();}
   }

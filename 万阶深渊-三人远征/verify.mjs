@@ -41,6 +41,17 @@ const expectedWebp = [
   "assets-webp/ui/equipment.webp",
   "assets-webp/ui/icons-v2.webp"
 ];
+const expectedV3 = [
+  ...["yutong", "wangshang", "chongrui"].flatMap(hero =>
+    ["idle", "move", "attack", "skill", "ultimate", "hit", "down"].flatMap(action =>
+      Array.from({ length: 4 }, (_, i) => `assets-v3/heroes/${hero}/${action}-${i + 1}.webp`))),
+  ...Array.from({ length: 10 }, (_, zone) =>
+    Array.from({ length: 3 }, (_, enemy) =>
+      ["idle", "attack"].flatMap(action =>
+        Array.from({ length: 4 }, (_, i) => `assets-v3/enemies/zone-${String(zone + 1).padStart(2, "0")}/enemy-${String(enemy + 1).padStart(2, "0")}-${action}-${i + 1}.webp`))).flat()).flat(),
+  ...Array.from({ length: 10 }, (_, family) =>
+    Array.from({ length: 10 }, (_, form) => `assets-v3/bosses/family-${String(family + 1).padStart(2, "0")}/form-${String(form + 1).padStart(2, "0")}.webp`)).flat()
+];
 
 function pngInfo(file) {
   const data = fs.readFileSync(path.join(root, file));
@@ -84,13 +95,24 @@ for (const file of expectedWebp) {
   totalBytes += webpInfo(file).bytes;
 }
 
+for (const file of expectedV3) {
+  const full = path.join(root, file);
+  ok(fs.existsSync(full), `缺少 v3 独立帧：${file}`);
+  if (!fs.existsSync(full)) continue;
+  totalBytes += webpInfo(file).bytes;
+}
+
 ok(!js.includes(".png") && !css.includes(".png"), "运行代码仍引用 PNG，WebP 切换不完整");
 ok(js.includes("scheduleZonePreload(zoneIndex)"), "缺少当前区域与下一地区预加载策略");
+ok(js.includes("function playSprite"), "缺少独立图片帧播放逻辑");
+ok(!js.includes("assets-webp/heroes/") && !js.includes("assets-webp/enemies/") && !js.includes("assets-webp/bosses/"), "战斗单位仍在使用旧图集");
+ok(html.includes('<img id="enemySprite"'), "敌人未改为独立 img 图层");
+ok(fs.existsSync(path.join(root, "assets-v3/contact-sheets/bosses-all.jpg")), "缺少 100 Boss 总览验收图");
 
 if (errors.length) {
   console.error(errors.map(x => `- ${x}`).join("\n"));
   process.exit(1);
 }
-const finalAssetCount = expected.length + expectedV2.length + expectedWebp.length;
+const finalAssetCount = expected.length + expectedV2.length + expectedWebp.length + expectedV3.length;
 console.log(`验证通过：${finalAssetCount} 个最终生成素材，合计 ${(totalBytes / 1024 / 1024).toFixed(1)} MB。`);
 console.log("规则通过：10000 关、每 100 关 Boss、12 小时关闭收益、后台补算与 Boss 自动重试。");

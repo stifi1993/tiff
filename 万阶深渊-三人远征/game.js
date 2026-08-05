@@ -6,8 +6,8 @@
   const SAVE_VERSION = 2;
   const MAX_STAGE = 10000;
   const OFFLINE_CAP = 12 * 60 * 60;
-  const ACTION_ROWS = { idle: 0, move: 1, attack: 2, skill: 3, ultimate: 4, hit: 5, down: 6 };
   const assetCache = new Map();
+  const spriteTimers = new WeakMap();
   let preloadedZone = -1;
 
   const ZONES = [
@@ -170,7 +170,62 @@
   }
 
   function buildSprites() {
-    dom.partySprites.innerHTML = HERO_DEFS.map((hero, i) => `<div class="battle-hero hero-${i}" data-hero="${i}" style="background-image:url('assets-webp/heroes/${hero.id}-v2.webp');--hero-color:${hero.color};background-position:0 0"></div>`).join("");
+    dom.partySprites.innerHTML = HERO_DEFS.map((hero, i) => `<img class="battle-hero hero-${i}" data-hero="${i}" src="assets-v3/heroes/${hero.id}/idle-1.webp" alt="${hero.name} · ${hero.role}" draggable="false" style="--hero-color:${hero.color}">`).join("");
+    HERO_DEFS.forEach((hero, index) => {
+      for (const action of ["idle", "move", "attack", "skill", "ultimate", "hit", "down"]) {
+        heroFrameUrls(hero.id, action).forEach(url => preloadImage(url, action === "idle" ? "high" : "low"));
+      }
+      setHeroAction(index, "idle");
+    });
+  }
+
+  function heroFrameUrls(heroId, action) {
+    return Array.from({ length: 4 }, (_, index) => `assets-v3/heroes/${heroId}/${action}-${index + 1}.webp`);
+  }
+
+  function enemyFrameUrls(zoneIndex, enemyType, action) {
+    const zone = String(zoneIndex + 1).padStart(2, "0");
+    const enemy = String(enemyType + 1).padStart(2, "0");
+    return Array.from({ length: 4 }, (_, index) => `assets-v3/enemies/zone-${zone}/enemy-${enemy}-${action}-${index + 1}.webp`);
+  }
+
+  function bossFrameUrl(zoneIndex, evolution) {
+    return `assets-v3/bosses/family-${String(zoneIndex + 1).padStart(2, "0")}/form-${String(evolution + 1).padStart(2, "0")}.webp`;
+  }
+
+  function stopSpriteAnimation(element) {
+    const running = spriteTimers.get(element);
+    if (!running) return;
+    if (running.interval) clearInterval(running.interval);
+    if (running.timeout) clearTimeout(running.timeout);
+    spriteTimers.delete(element);
+  }
+
+  function playSprite(element, frames, duration, loop = false, onDone) {
+    stopSpriteAnimation(element);
+    let index = 0;
+    element.src = frames[0];
+    if (state.settings.reduceMotion) {
+      if (!loop && onDone) {
+        const timeout = setTimeout(onDone, duration);
+        spriteTimers.set(element, { timeout });
+      }
+      return;
+    }
+    const interval = setInterval(() => {
+      index += 1;
+      if (index >= frames.length) {
+        if (loop) index = 0;
+        else {
+          clearInterval(interval);
+          spriteTimers.delete(element);
+          if (onDone) onDone();
+          return;
+        }
+      }
+      element.src = frames[index];
+    }, Math.max(55, duration / frames.length));
+    spriteTimers.set(element, { interval });
   }
 
   function preloadImage(url, priority = "low") {
@@ -187,8 +242,8 @@
     const number = String(zoneIndex + 1).padStart(2, "0");
     return [
       `assets-webp/backgrounds/zone-${number}.webp`,
-      `assets-webp/enemies/zone-${number}-v2.webp`,
-      `assets-webp/bosses/family-${number}.webp`
+      ...Array.from({ length: 3 }, (_, enemy) => ["idle", "attack"].flatMap(action => enemyFrameUrls(zoneIndex, enemy, action))).flat(),
+      ...Array.from({ length: 10 }, (_, evolution) => bossFrameUrl(zoneIndex, evolution))
     ];
   }
 
@@ -618,7 +673,9 @@
     dom.gold.textContent = format(state.gold); dom.dust.textContent = format(state.dust); dom.ember.textContent = format(state.embers);
     dom.teamPower.textContent = `战力 ${format(teamPower())}`;
     dom.zoneIndex.textContent = `区域 ${String(zoneIndex+1).padStart(2,"0")}`; dom.zoneName.textContent = zone.name;
-    dom.battlefield.style.setProperty("--zone-bg", `url('assets-webp/backgrounds/zone-${String(zoneIndex+1).padStart(2,"0")}.webp')`);
+    const zoneBackground=`url('assets-webp/backgrounds/zone-${String(zoneIndex+1).padStart(2,"0")}.webp')`;
+    dom.battlefield.style.setProperty("--zone-bg",zoneBackground);
+    dom.battlefield.parentElement?.style.setProperty("--zone-bg",zoneBackground);
     dom.eliteMark.textContent = enemy?.elite ? "精英" : ""; dom.eliteMark.classList.toggle("hidden", !enemy?.elite);
     dom.bossMark.textContent = enemy?.boss ? "BOSS" : ""; dom.bossMark.classList.toggle("hidden", !enemy?.boss);
     if (enemy) {
@@ -637,7 +694,7 @@
     dom.heroCards.innerHTML = HERO_DEFS.map((def,i)=>{
       const h=state.heroes[i],r=runtime.heroes[i],s=heroStats(i),xpPct=h.xp/xpNeeded(h.level)*100;
       return `<article class="hero-card ${def.roleClass}" data-action="open-hero" data-hero="${i}" title="点击查看详情 · 攻击 ${format(s.atk)} · 防御 ${format(s.def)} · 暴击 ${(s.crit*100).toFixed(1)}%">
-        <div class="hero-avatar" style="background-image:url('assets-webp/heroes/${def.id}-v2.webp')"></div>
+        <div class="hero-avatar" style="background-image:url('assets-v3/heroes/${def.id}/idle-1.webp')"></div>
         <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level">Lv.${h.level}</span>
         <div class="mini-bars"><div class="mini-track"><div class="mini-fill hp" style="width:${r.alive?r.hp/r.maxHp*100:0}%"></div></div><div class="mini-track"><div class="mini-fill energy" style="width:${r.energy}%"></div></div></div>
         <div class="hero-stats"><span>生命 ${format(r.hp)}/${format(r.maxHp)}</span><span>训练 +${h.training}</span></div>
@@ -652,7 +709,7 @@
   function renderProgress(){
     const nextBoss=Math.min(MAX_STAGE,Math.ceil(runtime.battleStage/100)*100),zone=ZONES[zoneOf(nextBoss)],evo=bossEvolution(nextBoss);
     dom.nextBossStage.textContent=`第${nextBoss}关`;dom.nextBossName.textContent=`${zone.boss} · ${EVOLUTIONS[evo]}`;dom.nextBossDesc.textContent=zone.desc;
-    setAtlasPosition(dom.bossPortrait,`assets-webp/bosses/family-${String(zoneOf(nextBoss)+1).padStart(2,"0")}.webp`,evo,5,2);
+    dom.bossPortrait.src=bossFrameUrl(zoneOf(nextBoss),evo);
     if(state.activeBossStage){const sec=Math.max(0,Math.ceil((runtime.retryAt-Date.now())/1000));dom.retryText.textContent=sec?`${sec}秒后自动挑战`:"准备重返Boss战";dom.challengeBtn.disabled=false;}else{dom.retryText.textContent="尚未遭遇";dom.challengeBtn.disabled=true;}
     dom.dropPreview.innerHTML=[["weapon","武器"],["armor","护甲"],["relic","饰品"]].map(([slot,name])=>`<div class="drop-slot"><b class="gear-icon" style="margin:auto;${gearIconStyle(slot,zoneOf(nextBoss)%5)}"></b>${name}</div>`).join("");
     const bossPower=Math.pow(1.0052,nextBoss-1)*(1+zoneOf(nextBoss)*.42),bossHp=115*bossPower*17;
@@ -758,14 +815,10 @@
     const e=runtime.enemy;if(!e)return;
     dom.enemyUnit.classList.toggle("final-boss",e.boss&&runtime.battleStage===MAX_STAGE);
     if(e.boss){
-      const file=`assets-webp/bosses/family-${String(e.zoneIndex+1).padStart(2,"0")}.webp`;
-      dom.enemySprite.classList.remove("enemy-animated","enemy-attacking");
-      setAtlasPosition(dom.enemySprite,file,e.evo,5,2);
+      stopSpriteAnimation(dom.enemySprite);
+      dom.enemySprite.classList.remove("enemy-attacking");
+      dom.enemySprite.src=bossFrameUrl(e.zoneIndex,e.evo);
     }else{
-      const file=`assets-webp/enemies/zone-${String(e.zoneIndex+1).padStart(2,"0")}-v2.webp`;
-      dom.enemySprite.style.backgroundImage=`url('${file}')`;
-      dom.enemySprite.style.backgroundSize="400% 600%";
-      dom.enemySprite.classList.add("enemy-animated");
       setEnemyAction("idle");
     }
     dom.enemyUnit.style.width=e.boss?"clamp(260px,16vw,390px)":e.elite?"clamp(205px,12vw,290px)":"clamp(175px,10vw,250px)";
@@ -782,14 +835,25 @@
       }
       return;
     }
-    const row=e.enemyType*2+(action==="attack"?1:0);
-    dom.enemySprite.style.backgroundPosition=`0% ${row/5*100}%`;
     dom.enemySprite.classList.toggle("enemy-attacking",action==="attack");
-    if(action==="attack")setTimeout(()=>{if(runtime.enemy&&!runtime.enemy.boss){dom.enemySprite.style.backgroundPosition=`0% ${(runtime.enemy.enemyType*2)/5*100}%`;dom.enemySprite.classList.remove("enemy-attacking");}},460/state.speed);
+    const enemy=e;
+    playSprite(dom.enemySprite,enemyFrameUrls(e.zoneIndex,e.enemyType,action),action==="attack"?420/state.speed:920,action!=="attack",()=>{
+      if(runtime.enemy===enemy&&!runtime.enemy.boss){dom.enemySprite.classList.remove("enemy-attacking");setEnemyAction("idle");}
+    });
   }
-  function setAtlasPosition(el,url,index,cols,rows){const col=index%cols,row=Math.floor(index/cols);el.style.backgroundImage=`url('${url}')`;el.style.backgroundSize=`${cols*100}% ${rows*100}%`;el.style.backgroundPosition=`${cols===1?0:col/(cols-1)*100}% ${rows===1?0:row/(rows-1)*100}%`;}
   function gearIconStyle(slot,rarityIndex=0){const col={weapon:0,armor:1,relic:2}[slot]??0,row=clamp(rarityIndex,0,4);return`background-image:url('assets-webp/ui/equipment.webp');background-size:300% 500%;background-position:${col/2*100}% ${row/4*100}%`;}
-  function setHeroAction(i,action){const el=$(`[data-hero="${i}"].battle-hero`);if(!el)return;el.style.backgroundPositionY=`${ACTION_ROWS[action]/6*100}%`;el.classList.remove("action-attack","action-skill","action-hit","down");if(action==="attack")el.classList.add("action-attack");if(action==="skill"||action==="ultimate")el.classList.add("action-skill");if(action==="hit")el.classList.add("action-hit");if(action==="down")el.classList.add("down");if(action!=="down")setTimeout(()=>{if(runtime.heroes[i].alive){el.style.backgroundPositionY="0%";el.classList.remove("action-attack","action-skill","action-hit")}},550/state.speed);}
+  function setHeroAction(i,action){
+    const el=$(`[data-hero="${i}"].battle-hero`);if(!el)return;
+    el.classList.remove("action-attack","action-skill","action-hit","down");
+    if(action==="attack")el.classList.add("action-attack");
+    if(action==="skill"||action==="ultimate")el.classList.add("action-skill");
+    if(action==="hit")el.classList.add("action-hit");
+    if(action==="down")el.classList.add("down");
+    const duration={idle:900,move:620,attack:450,skill:650,ultimate:720,hit:280,down:700}[action]/state.speed;
+    playSprite(el,heroFrameUrls(HERO_DEFS[i].id,action),duration,action==="idle",()=>{
+      if(action!=="down"&&runtime.heroes[i].alive)setHeroAction(i,"idle");
+    });
+  }
   function emitSkillFx(heroIndex,type){
     if(state.settings.particles===false)return;
     const el=document.createElement("div");

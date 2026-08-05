@@ -103,8 +103,11 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 
 /* 战场 */
 .stage-layout { position: relative; min-height: 0; overflow: hidden; background: #070b12; }
-.battle-column, .battlefield { position: absolute; inset: 0; min-width: 0; min-height: 0; }
+.battle-column { position: absolute; inset: 0; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; background-color: #03060b; background-image: linear-gradient(rgba(2,4,8,.58),rgba(2,4,8,.72)), var(--zone-bg,none); background-size: cover; background-position: center; container-type: size; }
 .battlefield {
+  position: relative;
+  width: min(100cqw, calc(100cqh * 16 / 9));
+  height: min(100cqh, calc(100cqw * 9 / 16));
   overflow: hidden;
   background-color: #101522;
   background-image: linear-gradient(rgba(4,7,13,.08), rgba(3,5,10,.48)), var(--zone-bg, none);
@@ -126,29 +129,26 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .stage-heading { position: absolute; left: 50%; top: 1rem; z-index: 9; display: flex; gap: .4rem; transform: translateX(-50%); }
 .stage-heading span { padding: .28rem .75rem; border: 1px solid #87515b; background: rgba(43,12,23,.86); color: #f19aa7; font-size: .62rem; font-weight: 800; letter-spacing: .14em; }
 .party-sprites { position: absolute; left: 6%; right: 51%; bottom: 12%; z-index: 5; height: min(15rem, 39vh); }
-.battle-hero { position: absolute; bottom: 0; width: min(9.2rem, 12vw); height: min(13rem, 34vh); background-size: 400% 700%; background-repeat: no-repeat; image-rendering: pixelated; filter: drop-shadow(0 .5rem .42rem rgba(0,0,0,.9)); transform-origin: center bottom; }
+.battle-hero { position: absolute; bottom: 0; width: min(9.2rem, 12vw); height: min(13rem, 34vh); object-fit: contain; object-position: center bottom; image-rendering: pixelated; filter: drop-shadow(0 .5rem .42rem rgba(0,0,0,.9)); transform-origin: center bottom; user-select: none; pointer-events: none; }
 .battle-hero:nth-child(1) { left: 49%; }
 .battle-hero:nth-child(2) { left: 4%; bottom: -.4rem; transform: scale(.9); }
 .battle-hero:nth-child(3) { left: 27%; bottom: 2.1rem; transform: scale(.8); }
-.battle-hero.action-attack { animation: spriteFrames .45s steps(3), heroLunge .45s ease-out; }
-.battle-hero.action-skill { animation: spriteFrames .65s steps(3), heroSkill .65s ease-out; filter: drop-shadow(0 0 .8rem var(--cyan)); }
-.battle-hero.action-hit { animation: spriteFrames .28s steps(3), hitShake .28s; }
-.battle-hero.down { filter: grayscale(1) brightness(.5); transform: rotate(-80deg) translateY(2rem) !important; animation: spriteFrames .7s steps(3) forwards; }
-@keyframes spriteFrames { from { background-position-x: 0; } to { background-position-x: 100%; } }
+.battle-hero.action-attack { animation: heroLunge .45s ease-out; }
+.battle-hero.action-skill { animation: heroSkill .65s ease-out; filter: drop-shadow(0 0 .8rem var(--cyan)); }
+.battle-hero.action-hit { animation: hitShake .28s; }
+.battle-hero.down { filter: grayscale(1) brightness(.5); transform: rotate(-80deg) translateY(2rem) !important; transition: transform .45s ease-out, filter .45s; }
 @keyframes heroLunge { 50% { translate: 1.7rem 0; } }
 @keyframes heroSkill { 50% { scale: 1.13; filter: drop-shadow(0 0 1.3rem #fff); } }
 @keyframes hitShake { 25% { translate: -.42rem 0; } 75% { translate: .38rem 0; } }
 .enemy-unit { position: absolute; right: 14%; bottom: 12%; z-index: 5; width: 14rem; height: min(17rem, 42vh); transition: filter .2s; }
-.enemy-sprite { position: absolute; inset: 0; background-repeat: no-repeat; background-position: center; background-size: contain; image-rendering: pixelated; filter: drop-shadow(0 .65rem .55rem #000); animation: enemyIdle 2.2s ease-in-out infinite; }
-.enemy-sprite.enemy-animated { animation: enemyFrames .48s steps(3) infinite; }
-.enemy-sprite.enemy-animated.enemy-attacking { animation: enemyFrames .42s steps(3) 1; }
+.enemy-sprite { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center bottom; image-rendering: pixelated; filter: drop-shadow(0 .65rem .55rem #000); animation: enemyIdle 2.2s ease-in-out infinite; user-select: none; pointer-events: none; }
+.enemy-sprite.enemy-attacking { animation: none; }
 .enemy-shadow { position: absolute; left: 14%; right: 10%; bottom: 1%; z-index: -1; height: 1.2rem; border-radius: 50%; background: rgba(0,0,0,.66); filter: blur(.35rem); }
 .enemy-unit.hit { animation: enemyHit .24s; } .enemy-unit.dead { animation: enemyDie .55s forwards; }
 .enemy-unit.boss-attacking .enemy-sprite { animation: bossStrike .46s ease-out; }
 .enemy-unit.final-boss.boss-attacking .enemy-sprite { animation: finalBossStrike .76s cubic-bezier(.2,.8,.2,1); }
 .enemy-unit.final-boss.boss-attacking::before { content:""; position:absolute; inset:-18%; z-index:-1; border:2px solid rgba(187,71,109,.72); border-radius:50%; box-shadow:0 0 2rem rgba(133,95,198,.7),inset 0 0 1.4rem rgba(187,71,109,.45); animation:voidPulse .76s ease-out forwards; }
 @keyframes enemyIdle { 50% { transform: translateY(-.25rem) scaleY(1.012); } }
-@keyframes enemyFrames { from { background-position-x: 0; } to { background-position-x: 100%; } }
 @keyframes enemyHit { 50% { translate: .5rem 0; filter: brightness(2); } }
 @keyframes enemyDie { to { opacity: 0; transform: scale(.65); filter: brightness(2) blur(.3rem); } }
 @keyframes bossStrike { 45% { transform:translateX(-1.3rem) scale(1.08); filter:drop-shadow(0 0 1rem var(--ember)) brightness(1.25); } }
@@ -188,7 +188,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .enemy-hp { background: linear-gradient(90deg, #7c1938, #e24d61 70%, #ff8791); box-shadow: 0 0 .55rem rgba(226,77,97,.4); }
 .boss-badge { position: absolute; top: 1rem; right: 1rem; z-index: 11; width: min(19rem, 23vw); min-height: 4.1rem; padding: .44rem; display: grid; grid-template-columns: 3.8rem 1fr; gap: .55rem; text-align: left; cursor: default; transition: border-color .16s, background .16s; }
 .boss-badge:hover, .boss-badge:focus-visible { border-color: var(--line-hot); background: rgba(11,18,30,.96); }
-.boss-portrait { width: 3.8rem; height: 3.2rem; background-size: 500% 200%; background-repeat: no-repeat; image-rendering: pixelated; filter: drop-shadow(0 .3rem .2rem #000); }
+.boss-portrait { width: 3.8rem; height: 3.2rem; object-fit: contain; object-position: center bottom; image-rendering: pixelated; filter: drop-shadow(0 .3rem .2rem #000); }
 .boss-badge-copy { min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .boss-badge-copy small { color: var(--muted); font-size: .56rem; } .boss-badge-copy small b { color: var(--ember); }
 .boss-badge-copy strong { margin: .18rem 0; overflow: hidden; font-size: .73rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -231,7 +231,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .hero-card { position: relative; min-width: 0; overflow: hidden; padding: .5rem .5rem .45rem 4.1rem; border: 1px solid #2e3a50; background: linear-gradient(105deg, rgba(24,34,51,.97), rgba(11,17,28,.97)); }
 .hero-card::after { content: ""; position: absolute; inset: auto 0 0; height: 2px; background: var(--role-color, var(--gold)); opacity: .8; }
 .hero-card.tank { --role-color: var(--gold); } .hero-card.dps { --role-color: var(--danger); } .hero-card.support { --role-color: var(--cyan); }
-.hero-avatar { position: absolute; left: .15rem; bottom: -.4rem; width: 4rem; height: 5.5rem; background-position: 0 0; background-size: 400% 700%; image-rendering: pixelated; filter: drop-shadow(0 .3rem .28rem #000); }
+.hero-avatar { position: absolute; left: .15rem; bottom: -.4rem; width: 4rem; height: 5.5rem; background-position: center bottom; background-size: contain; background-repeat: no-repeat; image-rendering: pixelated; filter: drop-shadow(0 .3rem .28rem #000); }
 .hero-card h3 { margin: 0; padding-right: 2.7rem; overflow: hidden; font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
 .hero-card h3 span { display: block; margin-top: .08rem; color: var(--muted); font-size: .54rem; font-weight: 400; }
 .hero-level { position: absolute; top: .45rem; right: .45rem; color: var(--gold); font-size: .58rem; }

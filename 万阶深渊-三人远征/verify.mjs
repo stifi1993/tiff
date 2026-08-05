@@ -33,11 +33,25 @@ const expectedV2 = [
   ...Array.from({ length: 10 }, (_, i) => `assets-v2/enemies/zone-${String(i + 1).padStart(2, "0")}-v2.png`),
   "assets-v2/ui/icons-v2.png"
 ];
+const expectedWebp = [
+  ...["yutong", "wangshang", "chongrui"].map(x => `assets-webp/heroes/${x}-v2.webp`),
+  ...Array.from({ length: 10 }, (_, i) => `assets-webp/backgrounds/zone-${String(i + 1).padStart(2, "0")}.webp`),
+  ...Array.from({ length: 10 }, (_, i) => `assets-webp/enemies/zone-${String(i + 1).padStart(2, "0")}-v2.webp`),
+  ...Array.from({ length: 10 }, (_, i) => `assets-webp/bosses/family-${String(i + 1).padStart(2, "0")}.webp`),
+  "assets-webp/ui/equipment.webp",
+  "assets-webp/ui/icons-v2.webp"
+];
 
 function pngInfo(file) {
   const data = fs.readFileSync(path.join(root, file));
   ok(data.subarray(1, 4).toString() === "PNG", `${file} 不是有效 PNG`);
   return { width: data.readUInt32BE(16), height: data.readUInt32BE(20), colorType: data[25], bytes: data.length };
+}
+
+function webpInfo(file) {
+  const data = fs.readFileSync(path.join(root, file));
+  ok(data.subarray(0, 4).toString() === "RIFF" && data.subarray(8, 12).toString() === "WEBP", `${file} 不是有效 WebP`);
+  return { bytes: data.length };
 }
 
 let totalBytes = 0;
@@ -63,10 +77,20 @@ for (const file of expectedV2) {
   if (file.includes("assets-v2/ui/")) ok(info.width === info.height, `${file} 不是正方形 UI 图集`);
 }
 
+for (const file of expectedWebp) {
+  const full = path.join(root, file);
+  ok(fs.existsSync(full), `缺少 WebP 运行素材：${file}`);
+  if (!fs.existsSync(full)) continue;
+  totalBytes += webpInfo(file).bytes;
+}
+
+ok(!js.includes(".png") && !css.includes(".png"), "运行代码仍引用 PNG，WebP 切换不完整");
+ok(js.includes("scheduleZonePreload(zoneIndex)"), "缺少当前区域与下一地区预加载策略");
+
 if (errors.length) {
   console.error(errors.map(x => `- ${x}`).join("\n"));
   process.exit(1);
 }
-const finalAssetCount = expected.length + expectedV2.length;
+const finalAssetCount = expected.length + expectedV2.length + expectedWebp.length;
 console.log(`验证通过：${finalAssetCount} 个最终生成素材，合计 ${(totalBytes / 1024 / 1024).toFixed(1)} MB。`);
 console.log("规则通过：10000 关、每 100 关 Boss、12 小时关闭收益、后台补算与 Boss 自动重试。");

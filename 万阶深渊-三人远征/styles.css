@@ -91,7 +91,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .top-actions { display: flex; align-items: center; justify-content: flex-end; min-width: 0; gap: .65rem; }
 .resource-strip { display: flex; min-width: 0; }
 .resource { position: relative; min-width: clamp(4.75rem, 6.4vw, 7rem); padding: .36rem .65rem .36rem 2.05rem; border-left: 1px solid #3a4860; background: rgba(255,255,255,.018); }
-.resource::before { content: ""; position: absolute; left: .45rem; top: 50%; width: 1.25rem; height: 1.25rem; transform: translateY(-50%); background-image: url('assets-v2/ui/icons-v2.png'); background-size: 400% 400%; background-repeat: no-repeat; image-rendering: pixelated; }
+.resource::before { content: ""; position: absolute; left: .45rem; top: 50%; width: 1.25rem; height: 1.25rem; transform: translateY(-50%); background-image: url('assets-webp/ui/icons-v2.webp'); background-size: 400% 400%; background-repeat: no-repeat; image-rendering: pixelated; }
 .resource.gold::before { background-position: 66.666% 33.333%; } .resource.dust::before { background-position: 100% 33.333%; } .resource.ember::before { background-position: 0 66.666%; }
 .resource span { display: block; color: var(--muted); font-size: .58rem; }
 .resource strong { display: block; margin-top: .08rem; overflow: hidden; font-size: .8rem; text-overflow: ellipsis; }
@@ -216,7 +216,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .side-drawer.open { transform: translateX(0); }
 .drawer-header { display: flex; align-items: center; justify-content: space-between; padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(12,18,29,.98), rgba(18,25,39,.98)); }
 .drawer-header small { color: var(--gold); font-size: .58rem; letter-spacing: .18em; } .drawer-header h2 { margin: .1rem 0 0; font-size: 1.05rem; letter-spacing: .14em; }
-.drawer-close, .modal-close { width: 2rem; height: 2rem; border: 1px solid #3d4a62; background-color: #121b2a; background-image: url('assets-v2/ui/icons-v2.png'); background-size: 400% 400%; background-position: 66.666% 100%; background-repeat: no-repeat; color: transparent; image-rendering: pixelated; cursor: pointer; }
+.drawer-close, .modal-close { width: 2rem; height: 2rem; border: 1px solid #3d4a62; background-color: #121b2a; background-image: url('assets-webp/ui/icons-v2.webp'); background-size: 400% 400%; background-position: 66.666% 100%; background-repeat: no-repeat; color: transparent; image-rendering: pixelated; cursor: pointer; }
 .drawer-close:hover, .modal-close:hover { border-color: var(--gold); color: var(--gold-bright); }
 .drawer-scrim { position: absolute; inset: 0; z-index: 25; visibility: hidden; opacity: 0; background: rgba(2,4,8,.46); transition: opacity .18s; }
 .drawer-scrim.open { visibility: visible; opacity: 1; }
@@ -250,7 +250,7 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .tab-nav { min-width: 0; display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: .32rem; padding-top: 1.2rem; }
 .tab-btn { position: relative; min-width: 0; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .tab-btn i { width: 1.75rem; height: 1.75rem; margin: 0 auto .18rem; display: grid; place-items: center; border: 1px solid #303c52; background-color: #101824; color: #c3ccda; font-style: normal; font-size: .65rem; }
-.ui-icon { background-image: url('assets-v2/ui/icons-v2.png'); background-size: 400% 400%; background-repeat: no-repeat; image-rendering: pixelated; }
+.ui-icon { background-image: url('assets-webp/ui/icons-v2.webp'); background-size: 400% 400%; background-repeat: no-repeat; image-rendering: pixelated; }
 .icon-team { background-position: 0 0; } .icon-gear { background-position: 33.333% 0; } .icon-talent { background-position: 66.666% 0; } .icon-codex { background-position: 100% 0; } .icon-rebirth { background-position: 0 33.333%; } .icon-settings { background-position: 33.333% 33.333%; }
 .tab-btn span { display: block; overflow: hidden; font-size: .6rem; text-overflow: ellipsis; white-space: nowrap; }
 .tab-btn:hover { border-color: #34425b; background: #121b2a; color: var(--text); }

@@ -7,6 +7,8 @@
   const MAX_STAGE = 10000;
   const OFFLINE_CAP = 12 * 60 * 60;
   const ACTION_ROWS = { idle: 0, move: 1, attack: 2, skill: 3, ultimate: 4, hit: 5, down: 6 };
+  const assetCache = new Map();
+  let preloadedZone = -1;
 
   const ZONES = [
     { name: "苔痕地窟", boss: "苔岩巨魔", desc: "盘踞在潮湿石窟中的远古巨兽。", enemies: ["洞穴黏怪", "苔甲鼠", "石牙蝠"], hue: "#59774b" },
@@ -161,11 +163,45 @@
     setInterval(loop, 100);
     setInterval(() => saveState(false), 5000);
     window.addEventListener("beforeunload", () => saveState(false));
+    if (document.documentElement && typeof performance !== "undefined") {
+      document.documentElement.dataset.interactiveMs = String(Math.round(performance.now()));
+    }
     // 不重置 lastFrame：后台标签页恢复时必须按真实经过时间补算战斗。
   }
 
   function buildSprites() {
-    dom.partySprites.innerHTML = HERO_DEFS.map((hero, i) => `<div class="battle-hero hero-${i}" data-hero="${i}" style="background-image:url('assets-v2/heroes/${hero.id}-v2.png');--hero-color:${hero.color};background-position:0 0"></div>`).join("");
+    dom.partySprites.innerHTML = HERO_DEFS.map((hero, i) => `<div class="battle-hero hero-${i}" data-hero="${i}" style="background-image:url('assets-webp/heroes/${hero.id}-v2.webp');--hero-color:${hero.color};background-position:0 0"></div>`).join("");
+  }
+
+  function preloadImage(url, priority = "low") {
+    if (assetCache.has(url) || typeof Image === "undefined") return assetCache.get(url);
+    const image = new Image();
+    image.decoding = "async";
+    if ("fetchPriority" in image) image.fetchPriority = priority;
+    image.src = url;
+    assetCache.set(url, image);
+    return image;
+  }
+
+  function zoneAssets(zoneIndex) {
+    const number = String(zoneIndex + 1).padStart(2, "0");
+    return [
+      `assets-webp/backgrounds/zone-${number}.webp`,
+      `assets-webp/enemies/zone-${number}-v2.webp`,
+      `assets-webp/bosses/family-${number}.webp`
+    ];
+  }
+
+  function scheduleZonePreload(zoneIndex) {
+    if (preloadedZone === zoneIndex) return;
+    preloadedZone = zoneIndex;
+    zoneAssets(zoneIndex).forEach(url => preloadImage(url, "high"));
+    if (document.documentElement) document.documentElement.dataset.preloadedZone = String(zoneIndex + 1);
+    const nextZone = Math.min(ZONES.length - 1, zoneIndex + 1);
+    if (nextZone === zoneIndex) return;
+    const preloadNext = () => zoneAssets(nextZone).forEach(url => preloadImage(url));
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(preloadNext, { timeout: 1800 });
+    else setTimeout(preloadNext, 700);
   }
 
   function bindEvents() {
@@ -221,6 +257,7 @@
   function spawnStage(stage, fresh = false) {
     runtime.battleStage = clamp(stage, 1, MAX_STAGE);
     const zoneIndex = zoneOf(stage);
+    scheduleZonePreload(zoneIndex);
     const boss = stage % 100 === 0;
     const elite = !boss && stage % 10 === 0;
     const power = Math.pow(1.0052, stage - 1) * (1 + zoneIndex * .42);
@@ -581,7 +618,7 @@
     dom.gold.textContent = format(state.gold); dom.dust.textContent = format(state.dust); dom.ember.textContent = format(state.embers);
     dom.teamPower.textContent = `战力 ${format(teamPower())}`;
     dom.zoneIndex.textContent = `区域 ${String(zoneIndex+1).padStart(2,"0")}`; dom.zoneName.textContent = zone.name;
-    dom.battlefield.style.setProperty("--zone-bg", `url('assets/backgrounds/zone-${String(zoneIndex+1).padStart(2,"0")}.png')`);
+    dom.battlefield.style.setProperty("--zone-bg", `url('assets-webp/backgrounds/zone-${String(zoneIndex+1).padStart(2,"0")}.webp')`);
     dom.eliteMark.textContent = enemy?.elite ? "精英" : ""; dom.eliteMark.classList.toggle("hidden", !enemy?.elite);
     dom.bossMark.textContent = enemy?.boss ? "BOSS" : ""; dom.bossMark.classList.toggle("hidden", !enemy?.boss);
     if (enemy) {
@@ -600,7 +637,7 @@
     dom.heroCards.innerHTML = HERO_DEFS.map((def,i)=>{
       const h=state.heroes[i],r=runtime.heroes[i],s=heroStats(i),xpPct=h.xp/xpNeeded(h.level)*100;
       return `<article class="hero-card ${def.roleClass}" data-action="open-hero" data-hero="${i}" title="点击查看详情 · 攻击 ${format(s.atk)} · 防御 ${format(s.def)} · 暴击 ${(s.crit*100).toFixed(1)}%">
-        <div class="hero-avatar" style="background-image:url('assets-v2/heroes/${def.id}-v2.png')"></div>
+        <div class="hero-avatar" style="background-image:url('assets-webp/heroes/${def.id}-v2.webp')"></div>
         <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level">Lv.${h.level}</span>
         <div class="mini-bars"><div class="mini-track"><div class="mini-fill hp" style="width:${r.alive?r.hp/r.maxHp*100:0}%"></div></div><div class="mini-track"><div class="mini-fill energy" style="width:${r.energy}%"></div></div></div>
         <div class="hero-stats"><span>生命 ${format(r.hp)}/${format(r.maxHp)}</span><span>训练 +${h.training}</span></div>
@@ -615,7 +652,7 @@
   function renderProgress(){
     const nextBoss=Math.min(MAX_STAGE,Math.ceil(runtime.battleStage/100)*100),zone=ZONES[zoneOf(nextBoss)],evo=bossEvolution(nextBoss);
     dom.nextBossStage.textContent=`第${nextBoss}关`;dom.nextBossName.textContent=`${zone.boss} · ${EVOLUTIONS[evo]}`;dom.nextBossDesc.textContent=zone.desc;
-    setAtlasPosition(dom.bossPortrait,`assets/bosses/family-${String(zoneOf(nextBoss)+1).padStart(2,"0")}.png`,evo,5,2);
+    setAtlasPosition(dom.bossPortrait,`assets-webp/bosses/family-${String(zoneOf(nextBoss)+1).padStart(2,"0")}.webp`,evo,5,2);
     if(state.activeBossStage){const sec=Math.max(0,Math.ceil((runtime.retryAt-Date.now())/1000));dom.retryText.textContent=sec?`${sec}秒后自动挑战`:"准备重返Boss战";dom.challengeBtn.disabled=false;}else{dom.retryText.textContent="尚未遭遇";dom.challengeBtn.disabled=true;}
     dom.dropPreview.innerHTML=[["weapon","武器"],["armor","护甲"],["relic","饰品"]].map(([slot,name])=>`<div class="drop-slot"><b class="gear-icon" style="margin:auto;${gearIconStyle(slot,zoneOf(nextBoss)%5)}"></b>${name}</div>`).join("");
     const bossPower=Math.pow(1.0052,nextBoss-1)*(1+zoneOf(nextBoss)*.42),bossHp=115*bossPower*17;
@@ -721,11 +758,11 @@
     const e=runtime.enemy;if(!e)return;
     dom.enemyUnit.classList.toggle("final-boss",e.boss&&runtime.battleStage===MAX_STAGE);
     if(e.boss){
-      const file=`assets/bosses/family-${String(e.zoneIndex+1).padStart(2,"0")}.png`;
+      const file=`assets-webp/bosses/family-${String(e.zoneIndex+1).padStart(2,"0")}.webp`;
       dom.enemySprite.classList.remove("enemy-animated","enemy-attacking");
       setAtlasPosition(dom.enemySprite,file,e.evo,5,2);
     }else{
-      const file=`assets-v2/enemies/zone-${String(e.zoneIndex+1).padStart(2,"0")}-v2.png`;
+      const file=`assets-webp/enemies/zone-${String(e.zoneIndex+1).padStart(2,"0")}-v2.webp`;
       dom.enemySprite.style.backgroundImage=`url('${file}')`;
       dom.enemySprite.style.backgroundSize="400% 600%";
       dom.enemySprite.classList.add("enemy-animated");
@@ -751,7 +788,7 @@
     if(action==="attack")setTimeout(()=>{if(runtime.enemy&&!runtime.enemy.boss){dom.enemySprite.style.backgroundPosition=`0% ${(runtime.enemy.enemyType*2)/5*100}%`;dom.enemySprite.classList.remove("enemy-attacking");}},460/state.speed);
   }
   function setAtlasPosition(el,url,index,cols,rows){const col=index%cols,row=Math.floor(index/cols);el.style.backgroundImage=`url('${url}')`;el.style.backgroundSize=`${cols*100}% ${rows*100}%`;el.style.backgroundPosition=`${cols===1?0:col/(cols-1)*100}% ${rows===1?0:row/(rows-1)*100}%`;}
-  function gearIconStyle(slot,rarityIndex=0){const col={weapon:0,armor:1,relic:2}[slot]??0,row=clamp(rarityIndex,0,4);return`background-image:url('assets/ui/equipment.png');background-size:300% 500%;background-position:${col/2*100}% ${row/4*100}%`;}
+  function gearIconStyle(slot,rarityIndex=0){const col={weapon:0,armor:1,relic:2}[slot]??0,row=clamp(rarityIndex,0,4);return`background-image:url('assets-webp/ui/equipment.webp');background-size:300% 500%;background-position:${col/2*100}% ${row/4*100}%`;}
   function setHeroAction(i,action){const el=$(`[data-hero="${i}"].battle-hero`);if(!el)return;el.style.backgroundPositionY=`${ACTION_ROWS[action]/6*100}%`;el.classList.remove("action-attack","action-skill","action-hit","down");if(action==="attack")el.classList.add("action-attack");if(action==="skill"||action==="ultimate")el.classList.add("action-skill");if(action==="hit")el.classList.add("action-hit");if(action==="down")el.classList.add("down");if(action!=="down")setTimeout(()=>{if(runtime.heroes[i].alive){el.style.backgroundPositionY="0%";el.classList.remove("action-attack","action-skill","action-hit")}},550/state.speed);}
   function emitSkillFx(heroIndex,type){
     if(state.settings.particles===false)return;

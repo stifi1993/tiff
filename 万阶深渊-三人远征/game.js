@@ -43,6 +43,8 @@
     hunt: { name: "猎杀", desc: "攻击、暴击与Boss伤害", color: "#e05e69" },
     star: { name: "星辉", desc: "治疗、金币、经验与掉落", color: "#67d3ca" }
   };
+  const BONFIRE_NODE_TYPES = ["attack", "vitality", "gold", "xp", "gear", "all"];
+  const BONFIRE_NODE_NAMES = { attack: "锋芒", vitality: "坚韧", gold: "丰饶", xp: "启悟", gear: "寻宝", all: "恒火" };
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -68,6 +70,7 @@
       autoTrain: { enabled: true, priority: "智能" }, autoSalvage: { 普通: true, 稀有: true, 史诗: true },
       codex: { bosses: [], enemies: [], gear: [] }, firstZoneSeen: [0], firstBossSeen: [],
       autoLog: [], autoTotals: { training: 0, skills: 0, equips: 0, enhances: 0 },
+      bonfire: { level: 0, autoRebirth: true, bossFailures: 0, lastRebirthStage: 0 },
       settings: { showDamage: true, uiScale: 100, highContrast: false, reduceMotion: false, particles: true, autoMaxSpeed: true },
       guide: { step: 0, dismissed: false }
     };
@@ -83,6 +86,7 @@
     merged.autoSalvage = { ...base.autoSalvage, ...(saved.autoSalvage || {}) };
     merged.codex = { ...base.codex, ...(saved.codex || {}) };
     merged.autoTotals = { ...base.autoTotals, ...(saved.autoTotals || {}) };
+    merged.bonfire = { ...base.bonfire, ...(saved.bonfire || {}) };
     merged.autoLog = Array.isArray(saved.autoLog) ? saved.autoLog.slice(0, 30) : [];
     merged.bag = [];
     merged.settings = { ...base.settings, ...(saved.settings || {}) };
@@ -494,7 +498,7 @@
       const stats = heroStats(i);
       let damage = Math.max(1, e.atk * (.9 + Math.random() * .2) - stats.def * .65);
       if (runtime.enemy.debuff > 0) damage *= .82;
-      if (state.talents.guardCore) damage *= .88;
+      damage *= 1 / bonfireMultiplier("vitality");
       if (target.shield > 0) { const absorbed = Math.min(target.shield, damage); target.shield -= absorbed; damage -= absorbed; }
       target.hp = Math.max(0, target.hp - damage);
       if (!runtime.backgroundMode) { floatNumber(format(damage), 18 + i * 11, 55, false, false); setHeroAction(i, "hit"); }
@@ -531,7 +535,7 @@
     if (!defeated) return;
     runtime.pendingSpawn = true;
     state.totalKills++;
-    const rewardMult = 1 + state.talents.star * .04 + (state.talents.starCore ? .2 : 0);
+    const rewardMult = bonfireMultiplier("gold");
     const gold = (12 + runtime.battleStage * .85) * (defeated.boss ? 12 : defeated.elite ? 3 : 1) * rewardMult;
     const xp = (8 + runtime.battleStage * .48) * (defeated.boss ? 8 : defeated.elite ? 2 : 1) * rewardMult;
     state.gold += gold;
@@ -540,7 +544,8 @@
       const first = !state.codex.bosses.includes(runtime.battleStage);
       if (first) { state.codex.bosses.push(runtime.battleStage); state.embers += 2 + Math.floor(runtime.battleStage / 500); generateGear(true); toast(`首胜！获得灵魂余烬与保底装备`); }
       else if (Math.random() < .08) generateGear(false);
-    } else if (Math.random() < (.075 + state.talents.star * .003)) generateGear(false);
+    } else if (Math.random() < (.075 * bonfireMultiplier("gear"))) generateGear(false);
+    if (defeated.boss) state.bonfire.bossFailures = 0;
     if (background) advanceAfterWin();
     else {
       dom.enemyUnit.classList.add("dead");
@@ -565,6 +570,7 @@
     const isBoss = runtime.enemy?.boss;
     runtime.pendingSpawn = true;
     if (isBoss) {
+      state.bonfire.bossFailures++;
       state.activeBossStage = failedStage;
       runtime.retryAt = Date.now() + 30000;
       runtime.retryRemaining = 30;
@@ -574,6 +580,7 @@
     resetPartyRuntime();
     runtime.pendingSpawn = false;
     spawnStage(state.stage, true);
+    if (isBoss && shouldAutoRebirth()) performRebirth(true);
   }
 
   function immediateChallenge() {
@@ -655,15 +662,16 @@
       if (g.slot === "armor") { hp += value * 8; defense += value * .45; }
       if (g.slot === "relic") { crit += value * .00065; heal += value * .75; }
     });
-    hp *= 1 + state.talents.guard * .06; defense *= 1 + state.talents.guard * .04;
-    atk *= 1 + state.talents.hunt * .055;
-    heal *= 1 + state.talents.star * .055;
-    return { hp, atk, def: defense, crit: Math.min(.65, crit + state.talents.hunt * .006), critDmg, heal, haste: Math.min(.6, hero.level * .0007), bossDamage: 1 + state.talents.hunt * .035 + (state.talents.huntCore ? .25 : 0) };
+    hp *= bonfireMultiplier("vitality") * bonfireMultiplier("all");
+    defense *= bonfireMultiplier("vitality") * bonfireMultiplier("all");
+    atk *= bonfireMultiplier("attack") * bonfireMultiplier("all");
+    heal *= bonfireMultiplier("vitality") * bonfireMultiplier("all");
+    return { hp, atk, def: defense, crit: Math.min(.65, crit), critDmg, heal, haste: Math.min(.6, hero.level * .0007), bossDamage: bonfireMultiplier("attack") };
   }
 
   function teamPower() { return HERO_DEFS.reduce((sum, _, i) => { const s = heroStats(i); return sum + s.atk * 8 + s.hp * .8 + s.def * 10; }, 0); }
-  function estimatedDps() { return HERO_DEFS.reduce((sum, def, i) => { const s = heroStats(i); return sum + s.atk / def.interval * (1 + s.crit * (s.critDmg - 1)) * (i === 1 ? 1.28 : 1.12); }, 0) * (runtime.enemy?.boss ? (1 + state.talents.hunt * .035) : 1); }
-  function offlineRates(s = state) { const floor = Math.max(1, Math.min(s.stage, s.bestStage)); const star = s.talents?.star || 0; return { gold: (.7 + floor * .025) * (1 + star * .04), xp: (.42 + floor * .014) * (1 + star * .04) }; }
+  function estimatedDps() { return HERO_DEFS.reduce((sum, def, i) => { const s = heroStats(i); return sum + s.atk / def.interval * (1 + s.crit * (s.critDmg - 1)) * (i === 1 ? 1.28 : 1.12); }, 0) * (runtime.enemy?.boss ? bonfireMultiplier("attack") : 1); }
+  function offlineRates(s = state) { const floor = Math.max(1, Math.min(s.stage, s.bestStage)); const level = s.bonfire?.level || 0; const goldNodes = countBonfireType("gold", level) + countBonfireType("all", level) * .375; const xpNodes = countBonfireType("xp", level) + countBonfireType("all", level) * .375; return { gold: (.7 + floor * .025) * (1 + goldNodes * .04), xp: (.42 + floor * .014) * (1 + xpNodes * .04) }; }
 
   function addXpRaw(hero, amount) {
     hero.xp += amount;
@@ -762,13 +770,58 @@
     state.dust -= cost; item.enhance++; resetPartyRuntime(); renderTab();
   }
 
-  function performRebirth() {
-    if (state.bestStage < 100) { toast("通过第100关后才能篝火重整", true); return; }
+  function bonfireNodeCost(level = state.bonfire.level) { return 1 + Math.floor(level / 6); }
+  function countBonfireType(type, level = state.bonfire.level) {
+    let count = 0;
+    for (let i = 0; i < level; i++) if (BONFIRE_NODE_TYPES[i % BONFIRE_NODE_TYPES.length] === type) count++;
+    return count;
+  }
+  function bonfireMultiplier(type) {
+    const perNode = { attack: .035, vitality: .035, gold: .04, xp: .04, gear: .025, all: .015 }[type] || 0;
+    return 1 + countBonfireType(type) * perNode;
+  }
+  function projectedBonfireNodes(extraEmbers) {
+    let embers = state.embers + extraEmbers;
+    let level = state.bonfire.level;
+    let nodes = 0;
+    while (nodes < 1000) {
+      const cost = bonfireNodeCost(level);
+      if (embers < cost) break;
+      embers -= cost; level++; nodes++;
+    }
+    return nodes;
+  }
+  function lightBonfireNodes() {
+    let lit = 0;
+    while (lit < 1000) {
+      const cost = bonfireNodeCost();
+      if (state.embers < cost) break;
+      state.embers -= cost;
+      state.bonfire.level++;
+      lit++;
+    }
+    if (lit) recordAuto(`篝火星图自动点亮${lit}个节点`);
+    return lit;
+  }
+  function shouldAutoRebirth() {
+    if (!state.bonfire.autoRebirth || state.completed || state.bestStage < 100 || state.bonfire.bossFailures < 5) return false;
     const reward = rebirthReward();
+    const nodes = projectedBonfireNodes(reward);
+    return nodes >= 3 && nodes * .035 >= .1;
+  }
+
+  function performRebirth(automatic = false) {
+    if (state.bestStage < 100) { toast("通过第100关后才能篝火重整", true); return; }
+    if (automatic) saveState(false);
+    const reward = rebirthReward();
+    const fromStage = state.bestStage;
     state.embers += reward; state.rebirths++; state.stage = 1; state.gold = 40;
     state.heroes.forEach(h => { h.level = 1; h.xp = 0; h.training = 0; h.skillLevels = [1,0,0,0]; });
     state.activeBossStage = 0; runtime.retryAt = 0; runtime.retryRemaining = 0; state.completed = false;
+    state.bonfire.bossFailures = 0; state.bonfire.lastRebirthStage = fromStage;
+    const lit = lightBonfireNodes();
     resetPartyRuntime(); spawnStage(1,true); saveState(); closeModal(); renderTab(); toast(`篝火重整完成，获得${reward}灵魂余烬`);
+    recordAuto(`${automatic?"智能":"手动"}重整：第${fromStage}关返回起点，点亮${lit}个星图节点`);
   }
   function rebirthReward() { return Math.max(1, Math.floor(Math.pow(state.bestStage / 100, .72) * 5)); }
   function talentCost(branch) { return 1 + state.talents[branch]; }
@@ -823,7 +876,7 @@
     if(state.activeBossStage){const sec=Math.max(0,Math.ceil((runtime.retryAt-Date.now())/1000));dom.retryText.textContent=sec?`${sec}秒后自动挑战`:"准备重返Boss战";dom.challengeBtn.disabled=false;}else{dom.retryText.textContent="尚未遭遇";dom.challengeBtn.disabled=true;}
     dom.dropPreview.innerHTML=[["weapon","武器"],["armor","护甲"],["relic","饰品"]].map(([slot,name])=>`<div class="drop-slot"><b class="gear-icon" style="margin:auto;${gearIconStyle(slot,zoneOf(nextBoss)%5)}"></b>${name}</div>`).join("");
     const bossPower=Math.pow(1.0052,nextBoss-1)*(1+zoneOf(nextBoss)*.42),bossHp=115*bossPower*17;
-    const ratio=estimatedDps()*30*(1+state.talents.hunt*.035)/bossHp;
+    const ratio=estimatedDps()*30/bossHp;
     const winChance=Math.round(clamp(100/(1+Math.exp(-(ratio-1)*3)),3,99));
     dom.bossWinChance.textContent=`预计胜率 · ${winChance}%`;
     dom.bossWinChance.style.color=winChance>=70?"var(--good)":winChance>=40?"var(--gold)":"var(--danger)";
@@ -847,7 +900,7 @@
   }
   function renderTalentTab(){dom.tabContent.innerHTML=`<div class="talent-layout">${Object.entries(TALENTS).map(([key,t])=>`<div class="talent-branch" style="border-color:${t.color}55"><h3 style="color:${t.color}">${t.name}</h3><small>${t.desc}</small><div class="talent-nodes">${Array.from({length:10},(_,i)=>`<button class="talent-node ${i<state.talents[key]?"on":""}" data-action="talent" data-branch="${key}" ${i>state.talents[key]?"disabled":""}>${i+1}</button>`).join("")}<button class="talent-node core ${state.talents[key+"Core"]?"on":""}" data-action="talent-core" data-branch="${key}" ${state.talents[key]<10?"disabled":""}>核心节点 · 20余烬</button></div></div>`).join("")}</div><button class="inline-btn" style="margin-top:10px" data-action="talent-reset">免费重置并返还全部余烬</button>`;}
   function renderCodexTab(){const entries=[];for(let i=1;i<=100;i++){const stage=i*100,seen=state.codex.bosses.includes(stage);entries.push(`<div class="codex-entry ${seen?"seen":""}"><b>${seen?bossName(stage):"???"}</b><span>第${stage}关</span></div>`)}dom.tabContent.innerHTML=`<div class="subheading">Boss图鉴 · ${state.codex.bosses.length}/100</div><div class="codex-grid">${entries.join("")}</div>`;}
-  function renderRebirthTab(){const can=state.bestStage>=100;dom.tabContent.innerHTML=`<div class="settings-grid"><div class="setting-card"><h3>篝火重整</h3><p>返回第1关；重置金币、角色等级、技能等级与培养。装备、图鉴、灵魂余烬、永久天赋和历史最高关卡全部保留。</p><p>本次可获得：<strong>${rebirthReward()} 灵魂余烬</strong></p><button class="primary-btn" style="width:180px" data-action="rebirth-open" ${can?"":"disabled"}>${can?"点燃重整篝火":"第100关后解锁"}</button></div><div class="setting-card"><h3>远征记录</h3><p>历史最高：第${state.bestStage}关</p><p>重整次数：${state.rebirths}</p><p>累计击杀：${format(state.totalKills)}</p><p>当前倍速：${state.speed}×</p></div></div>`;}
+  function renderRebirthTab(){const can=state.bestStage>=100,nextCost=bonfireNodeCost();const start=Math.floor(state.bonfire.level/30)*30;const nodes=Array.from({length:30},(_,offset)=>{const i=start+offset,type=BONFIRE_NODE_TYPES[i%6],on=i<state.bonfire.level,next=i===state.bonfire.level;return`<div class="talent-node ${on?"on":""} ${next?"next":""}" title="${BONFIRE_NODE_NAMES[type]}">${i+1}<small>${BONFIRE_NODE_NAMES[type]}</small></div>`}).join("");dom.tabContent.innerHTML=`<div class="settings-grid"><div class="setting-card"><h3>篝火星图 · ${state.bonfire.level}级</h3><p>余烬会按固定顺序自动点亮永久增幅，不需要选择路线。下一节点需要 <strong>${nextCost}余烬</strong>。</p><div class="talent-nodes bonfire-map">${nodes}</div><p>攻击 ×${bonfireMultiplier("attack").toFixed(2)} · 生存 ×${bonfireMultiplier("vitality").toFixed(2)} · 金币 ×${bonfireMultiplier("gold").toFixed(2)}</p></div><div class="setting-card"><h3>智能重整</h3><p>同一Boss连续失败5次，且本次余烬足以带来至少约10%永久成长时自动重整。</p><div class="setting-row"><span>自动重整</span><button class="inline-btn" data-action="auto-rebirth-toggle">${state.bonfire.autoRebirth?"开启":"关闭"}</button></div><p>当前连续失败：${state.bonfire.bossFailures}/5</p><p>本次预计余烬：<strong>${rebirthReward()}</strong></p><button class="primary-btn" style="width:180px" data-action="rebirth-open" ${can?"":"disabled"}>${can?"立即重整":"第100关后解锁"}</button></div><div class="setting-card"><h3>远征记录</h3><p>历史最高：第${state.bestStage}关</p><p>重整次数：${state.rebirths}</p><p>累计击杀：${format(state.totalKills)}</p></div></div>`;}
   function renderSettingsTab(){
     dom.tabContent.innerHTML=`<div class="settings-grid">
       <div class="setting-card"><h3>界面与性能</h3>
@@ -892,6 +945,7 @@
     if(action==="damage-toggle"){state.settings.showDamage=!state.settings.showDamage;renderTab();saveState();}
     if(action==="auto-growth-toggle"){toggleAutoTrain();renderTab();saveState();}
     if(action==="auto-speed-toggle"){state.settings.autoMaxSpeed=state.settings.autoMaxSpeed===false;renderSpeed();renderTab();saveState();}
+    if(action==="auto-rebirth-toggle"){state.bonfire.autoRebirth=!state.bonfire.autoRebirth;renderTab();saveState();}
     if(action==="guide-close"){state.guide.dismissed=true;dom.guideTip.classList.add("hidden");saveState();}
     if(action==="guide-reset"){state.guide.dismissed=false;showGuide();}
   }
@@ -980,7 +1034,7 @@
   function toastMini(text,x,y){floatNumber(text,x,y,false,true);}
   function toast(message,bad=false){if(runtime?.backgroundMode)return;const el=document.createElement("div");el.className=`toast ${bad?"bad":""}`;el.textContent=message;$("#toastStack").appendChild(el);setTimeout(()=>el.remove(),3200);}
   function showOfflineReport(r){openModal(`<h2 id="modalTitle">挂机收益</h2><p>网页关闭期间关卡保持在原位；金币与经验结算后，系统已自动完成最有效的成长。</p><div class="tab-grid"><div class="info-card"><h3>离开时间</h3><strong>${formatDuration(r.seconds)}</strong></div><div class="info-card"><h3>获得金币</h3><strong>${format(r.gold)}</strong></div><div class="info-card"><h3>每人经验</h3><strong>${format(r.xp)}</strong></div><div class="info-card"><h3>自动成长</h3><strong>${format(r.upgrades||0)}次</strong></div></div>${r.seconds>=OFFLINE_CAP-1?'<p>已达到12小时离线储存上限。</p>':''}`);}
-  function rebirthModal(){openModal(`<h2 id="modalTitle">点燃重整篝火？</h2><p>关卡、金币、角色等级、技能等级与培养将被重置。装备、图鉴、天赋及最高纪录保留。</p><p>本次获得 <strong>${rebirthReward()} 灵魂余烬</strong></p><button class="primary-btn" data-action="rebirth-confirm">确认重整</button>`);}
+  function rebirthModal(){openModal(`<h2 id="modalTitle">点燃重整篝火？</h2><p>返回第1关并重置金币、角色等级、技能等级与培养；装备、图鉴、篝火星图及最高纪录保留。</p><p>本次获得 <strong>${rebirthReward()} 灵魂余烬</strong>，并自动点亮星图节点。</p><button class="primary-btn" data-action="rebirth-confirm">确认重整</button>`);}
   function exportSave(){saveState();const data=btoa(unescape(encodeURIComponent(JSON.stringify(state))));openModal(`<h2 id="modalTitle">导出存档</h2><p>复制下方文本并妥善保存。</p><textarea id="saveText">${data}</textarea><button class="inline-btn" data-action="copy-save">手动复制文本</button>`);const ta=$("#saveText");ta.focus();ta.select();navigator.clipboard?.writeText(data).then(()=>toast("存档已复制到剪贴板")).catch(()=>{});}
   function importSaveModal(){openModal(`<h2 id="modalTitle">导入存档</h2><p>粘贴存档文本。当前进度将在验证成功后被替换。</p><textarea id="saveText" placeholder="在此粘贴存档"></textarea><button class="primary-btn" data-action="import-confirm">验证并导入</button>`);}
   function importSave(){try{const text=$("#saveText").value.trim();const parsed=JSON.parse(decodeURIComponent(escape(atob(text))));if(parsed.version!==SAVE_VERSION)throw new Error("存档版本不兼容");state=mergeState(parsed);saveState();location.reload();}catch(e){toast("仅支持v3存档",true);}}
@@ -1001,6 +1055,7 @@
       retryNow: () => { runtime.retryAt = 0; runtime.retryRemaining = 0; maybeAutoChallenge(); },
       backgroundSeconds: seconds => simulateBackground(seconds * state.speed),
       detailedSeconds: seconds => simulateForeground(seconds),
+      openSeconds: seconds => { let remaining = seconds; while (remaining > 0 && !state.completed) { renderSpeed(); const realChunk = Math.min(600, remaining); simulateBackground(realChunk * state.speed); remaining -= realChunk; } },
       setBestStage: stage => { state.bestStage = clamp(stage, 1, MAX_STAGE); },
       rebirthNow: () => performRebirth()
     };

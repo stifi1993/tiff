@@ -277,6 +277,10 @@ h1 { margin: 0; font-family: Georgia, "Microsoft YaHei", serif; font-size: clamp
 .talent-nodes { display: grid; grid-template-columns: repeat(5,1fr); gap: .32rem; margin-top: .6rem; }
 .talent-node { aspect-ratio: 1; border: 1px solid #3a465e; background: #151e2d; color: var(--muted); font-size: .62rem; cursor: pointer; }
 .talent-node.on { border-color: var(--gold); background: #59441f; color: #fff; } .talent-node.core { grid-column: span 5; height: 1.8rem; aspect-ratio: auto; }
+.bonfire-map { grid-template-columns: repeat(6,1fr); }
+.bonfire-map .talent-node { display: grid; place-content: center; cursor: default; }
+.bonfire-map .talent-node small { display: block; margin-top: .12rem; font-size: .46rem; }
+.bonfire-map .talent-node.next { border-color: var(--cyan); box-shadow: inset 0 0 .8rem rgba(105,224,220,.2); color: var(--cyan); }
 .codex-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: .42rem; }
 .codex-entry { min-height: 3.9rem; display: grid; place-content: center; text-align: center; border: 1px solid #2b3548; background: #080d15; color: var(--muted); font-size: .56rem; }
 .codex-entry b { display: block; } .codex-entry.seen { border-color: #68542b; color: var(--gold); }

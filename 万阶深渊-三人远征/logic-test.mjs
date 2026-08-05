@@ -134,4 +134,26 @@ longBackground.backgroundSeconds(3600);
 assert.ok(Date.now() - longStart < 5000, "一小时后台补算必须在5秒内完成");
 assert.ok(longBackground.snapshot().state.totalKills > 0, "长时间后台补算必须实际执行战斗");
 
-console.log("逻辑测试通过：Boss规则、区域边界、失败重试、10000关终点、关闭收益与v3强制开档均符合设计。");
+const autoRebirth = createContext({ version: 3, stage: 500, bestStage: 500, gold: 0, lastSavedAt: Date.now() }, "abyss-expedition-v3", 99);
+autoRebirth.setBestStage(500);
+autoRebirth.setStage(500);
+for (let attempt = 0; attempt < 5; attempt++) {
+  autoRebirth.failNow();
+  if (attempt < 4) autoRebirth.retryNow();
+}
+snap = autoRebirth.snapshot();
+assert.equal(snap.state.stage, 1, "连续五次Boss失败且收益充足时必须智能重整");
+assert.equal(snap.state.rebirths, 1, "智能重整次数必须正确累计");
+assert.ok(snap.state.bonfire.level >= 3, "重整余烬必须自动点亮篝火星图");
+
+if (process.argv.includes("--balance")) {
+  const hoursArg = process.argv.find(arg => arg.startsWith("--hours="));
+  const hours = Math.max(1, Number(hoursArg?.split("=")[1]) || 80);
+  const balance = createContext({ version: 3, stage: 1, bestStage: 1, gold: 40, lastSavedAt: Date.now() }, "abyss-expedition-v3", 20260805);
+  const balanceStart = Date.now();
+  balance.openSeconds(hours * 3600);
+  const balanceSnap = balance.snapshot();
+  console.log(`${hours}小时平衡模拟`, JSON.stringify({ stage: balanceSnap.state.stage, bestStage: balanceSnap.state.bestStage, completed: balanceSnap.state.completed, rebirths: balanceSnap.state.rebirths, bonfire: balanceSnap.state.bonfire.level, elapsedMs: Date.now() - balanceStart }));
+}
+
+console.log("逻辑测试通过：Boss规则、区域边界、失败重试、智能重整、篝火星图、前后台一致性、10000关终点、关闭收益与v3强制开档均符合设计。");

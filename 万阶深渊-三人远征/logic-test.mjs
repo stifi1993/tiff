@@ -56,6 +56,8 @@ function createContext(saved = null, saveKey = "abyss-expedition-v3", seed = 123
   };
   context.window = context;
   context.globalThis = context;
+  vm.runInNewContext(fs.readFileSync("rules.js", "utf8"), context, { filename: "rules.js" });
+  vm.runInNewContext(fs.readFileSync("save-state.js", "utf8"), context, { filename: "save-state.js" });
   vm.runInNewContext(fs.readFileSync("game.js", "utf8"), context, { filename: "game.js" });
   const api = context.__ABYSS_TEST__;
   api.storageKeys = () => [...storage.keys()];
@@ -100,6 +102,31 @@ assert.equal(snap.runtime.enemy.evo, 9);
 api.setStage(1001);
 assert.equal(api.snapshot().runtime.enemy.zoneIndex, 1, "第 1001 关必须进入第二区域");
 
+const mechanicNames = [];
+for (let family = 0; family < 10; family++) {
+  const stage = family * 1000 + 100;
+  api.setStage(stage);
+  mechanicNames.push(api.bossMechanic(stage).name);
+  assert.equal(api.snapshot().runtime.enemy.zoneIndex, family, `第${stage}关必须使用第${family + 1}族Boss机制`);
+}
+assert.equal(new Set(mechanicNames).size, 10, "10个Boss种族必须拥有10种独立标志机制");
+
+api.setStage(1100);
+const shellBefore = api.snapshot().runtime.enemy.shell;
+const shellHpBefore = api.snapshot().runtime.enemy.hp;
+api.heroHitNow(1000);
+snap = api.snapshot();
+assert.equal(snap.runtime.enemy.shell, shellBefore - 1, "钢甲虫王必须消耗甲壳层数抵挡攻击");
+assert.ok(shellHpBefore - snap.runtime.enemy.hp < 1000, "钢壳存在时必须实际降低所受伤害");
+
+const evolution = createContext({ version: 3, heroes: [{ level: 99 }, { level: 99 }, { level: 99 }], lastSavedAt: Date.now() }, "abyss-expedition-v3", 8);
+const stats99 = [0, 1, 2].map(index => evolution.heroStats(index));
+evolution.setHeroLevel(0, 100); evolution.setHeroLevel(1, 100); evolution.setHeroLevel(2, 100);
+const stats100 = [0, 1, 2].map(index => evolution.heroStats(index));
+assert.ok(stats100[0].hp > stats99[0].hp * 1.1, "铁壁守卫100级技能精研必须强化生存");
+assert.ok(stats100[1].atk > stats99[1].atk * 1.1, "暗影游侠100级技能精研必须强化输出");
+assert.ok(stats100[2].heal > stats99[2].heal * 1.1, "星辉祭司100级技能精研必须强化治疗");
+
 api.setStage(10000);
 snap = api.snapshot();
 assert.equal(snap.runtime.enemy.boss, true);
@@ -132,12 +159,34 @@ assert.equal(backSnap.runtime.battleStage, frontSnap.runtime.battleStage, "前�
 assert.ok(Math.abs(backSnap.runtime.enemy.hp - frontSnap.runtime.enemy.hp) < 1e-6, "前后台敌人剩余生命必须一致");
 assert.equal(JSON.stringify(backSnap.runtime.heroes.map(hero => [hero.hp, hero.energy, hero.alive])), JSON.stringify(frontSnap.runtime.heroes.map(hero => [hero.hp, hero.energy, hero.alive])), "前后台队伍状态必须一致");
 
+const transition = createContext(paritySave, "abyss-expedition-v3", 42);
+transition.beginWinNow();
+assert.equal(transition.snapshot().runtime.battleStage, 8, "击杀后的0.48秒转场必须属于统一游戏时间轴");
+transition.detailedSeconds(.47);
+assert.equal(transition.snapshot().runtime.battleStage, 8, "前台转场结束前不得提前刷新下一关");
+transition.detailedSeconds(.02);
+assert.equal(transition.snapshot().runtime.battleStage, 9, "前台转场耗时结束后必须进入下一关");
+
 const longBackground = createContext({ version: 3, stage: 1, bestStage: 1, gold: 40, lastSavedAt: Date.now() }, "abyss-expedition-v3", 7);
 const longStart = Date.now();
-longBackground.backgroundSeconds(3600);
-assert.ok(Date.now() - longStart < 5000, "一小时后台补算必须在5秒内完成");
+longBackground.backgroundSeconds(12 * 3600);
+assert.ok(Date.now() - longStart < 3000, "十二小时后台补算必须在3秒内完成");
 assert.ok(longBackground.snapshot().state.totalKills > 0, "长时间后台补算必须实际执行战斗");
 assert.ok(longBackground.snapshot().state.autoLog.some(entry => entry.message.includes("自动成长")), "自动培养与强化必须汇总到远征记录");
+
+const hostileSave = createContext({
+  version: 3, stage: -999, bestStage: Infinity, gold: -10, speed: 99,
+  heroes: [{ level: "bad", training: -5, skillLevels: [0, -1, 9e99], gear: { weapon: { rarityIndex: 99, base: -2 } } }],
+  autoLog: [{ at: "bad", message: '<img src=x onerror="globalThis.pwned=1">', important: "yes" }],
+  codex: { bosses: [99, 100, 100, 10100], enemies: ["0-0", "<script>"] }
+}, "abyss-expedition-v3");
+snap = hostileSave.snapshot();
+assert.equal(snap.state.stage, 1, "导入存档的关卡必须限制在合法范围");
+assert.equal(snap.state.gold, 0, "导入存档不得写入负资源");
+assert.equal(snap.state.speed, 1, "导入存档不得绕过倍速解锁规则");
+assert.equal(snap.state.heroes[0].gear.weapon, null, "非法装备必须被丢弃");
+assert.equal(JSON.stringify(snap.state.codex.bosses), JSON.stringify([100]), "图鉴只能接受合法Boss关卡且必须去重");
+assert.ok(hostileSave.escapeHtml(snap.state.autoLog[0].message).includes("&lt;img"), "存档日志渲染前必须进行HTML转义");
 
 const autoRebirth = createContext({ version: 3, stage: 500, bestStage: 500, gold: 0, lastSavedAt: Date.now() }, "abyss-expedition-v3", 99);
 autoRebirth.setBestStage(500);

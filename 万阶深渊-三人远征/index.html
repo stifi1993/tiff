@@ -85,11 +85,11 @@
           </section>
 
           <div id="bossIntro" class="boss-intro hidden"><small>深渊领主苏醒</small><strong id="bossTitle">苔岩巨魔 · 初生体</strong></div>
-          <div id="victoryOverlay" class="victory-overlay hidden"><span>永恒篝火已点燃</span><h2>万阶远征 · 完成</h2><p>三人的名字已刻入深渊尽头。</p></div>
+          <div id="victoryOverlay" class="victory-overlay hidden"><span>永恒篝火已点燃</span><h2>万阶远征 · 完成</h2><p>三人的名字已刻入深渊尽头。</p><button class="primary-btn victory-restart" type="button" data-action="restart-expedition-open">重新开始远征</button></div>
         </div>
       </section>
 
-      <aside id="sideDrawer" class="side-drawer panel-surface" aria-hidden="true">
+      <aside id="sideDrawer" class="side-drawer panel-surface" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true">
         <header class="drawer-header"><div><small>远征整备</small><h2 id="drawerTitle">队伍</h2></div><button id="drawerClose" class="drawer-close" aria-label="关闭面板">×</button></header>
         <div id="tabContent" class="tab-content"></div>
       </aside>
@@ -122,6 +122,8 @@
     <div class="modal-card"><button id="modalClose" class="modal-close" aria-label="关闭">×</button><div id="modalBody"></div></div>
   </div>
 
+  <script src="rules.js"></script>
+  <script src="save-state.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

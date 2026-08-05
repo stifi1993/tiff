@@ -4,28 +4,21 @@
   const SAVE_KEY = "abyss-expedition-v3";
   const SAVE_VERSION = 3;
   const LEGACY_SAVE_KEYS = ["abyss-expedition-v1", "abyss-expedition-backup-v1"];
-  const MAX_STAGE = 10000;
-  const OFFLINE_CAP = 12 * 60 * 60;
-  const ENEMY_HP_GROWTH = 1.0006725;
-  const ENEMY_ATK_GROWTH = 1.0006;
+  const RULES = globalThis.AbyssRules;
+  if (!RULES) throw new Error("核心规则未加载");
+  const {
+    MAX_STAGE, OFFLINE_CAP, ENEMY_HP_GROWTH, ENEMY_ATK_GROWTH, ZONES, EVOLUTIONS,
+    BOSS_MECHANICS, HERO_DEFS, BONFIRE_NODE_TYPES, BONFIRE_NODE_NAMES,
+    zoneOf, bossEvolution, xpNeeded, skillEvolutionTier, enemyStats
+  } = RULES;
+  const SAVE_TEXT_LIMIT = 1024 * 1024;
+  const DETAILED_BACKGROUND_WINDOW = 90;
+  const KILL_TRANSITION_SECONDS = .48;
   const assetCache = new Map();
   const spriteTimers = new WeakMap();
   let preloadedZone = -1;
   let visualRandomState = (Date.now() ^ 0x9e3779b9) >>> 0;
 
-  const ZONES = [
-    { name: "苔痕地窟", boss: "苔岩巨魔", desc: "盘踞在潮湿石窟中的远古巨兽。", enemies: ["洞穴黏怪", "苔甲鼠", "石牙蝠"], hue: "#59774b" },
-    { name: "废弃矿井", boss: "钢甲虫王", desc: "吞噬矿脉、披覆钢甲的虫群主宰。", enemies: ["矿镐傀儡", "铁壳甲虫", "幽灯矿工"], hue: "#b17a3d" },
-    { name: "亡魂墓穴", boss: "亡灵巫妖", desc: "以千年亡魂维系不朽王冠。", enemies: ["墓穴骷髅", "缚魂幽灵", "腐朽守卫"], hue: "#7b63a6" },
-    { name: "熔火锻炉", boss: "熔炉魔像", desc: "远古锻炉中永不停息的熔火核心。", enemies: ["熔岩幼体", "锻炉恶犬", "火炭傀儡"], hue: "#d75c36" },
-    { name: "水晶深渊", boss: "水晶九头蛇", desc: "每颗头颅都折射着致命晶光。", enemies: ["晶簇爬虫", "辉光水母", "镜甲蜥蜴"], hue: "#48a9b5" },
-    { name: "腐毒下水道", boss: "腐毒憎恶", desc: "由炼金废液与遗骸缝合而成。", enemies: ["毒囊蛙", "疫病鼠王", "污泥行者"], hue: "#7d9b43" },
-    { name: "永冻王陵", boss: "冰冠亡王", desc: "冻土王座上的最后一位守墓人。", enemies: ["霜骨兵", "冰晶女妖", "雪墓骑士"], hue: "#72a9d6" },
-    { name: "虚空监牢", boss: "虚空狱卒", desc: "看守现实裂隙的无面执刑者。", enemies: ["裂隙之眼", "锁链幽影", "虚空囚徒"], hue: "#855fc6" },
-    { name: "龙骨禁区", boss: "龙骨君主", desc: "披挂万龙遗骨的深渊领主。", enemies: ["骨翼幼龙", "龙墓祭司", "骸骨巨蜥"], hue: "#c9a567" },
-    { name: "魔王王座", boss: "深渊魔王", desc: "万阶尽头，等待篝火熄灭。", enemies: ["深渊侍从", "魔眼骑士", "王座执事"], hue: "#bb476d" }
-  ];
-  const EVOLUTIONS = ["初生体", "坚甲体", "狂暴体", "魔能体", "领主形态", "灾厄形态", "深渊形态", "王冠形态", "灭世形态", "终焉形态"];
   const RARITIES = [
     { name: "普通", color: "#a8b0bd", mult: 1, weight: 60 },
     { name: "稀有", color: "#5caeff", mult: 1.8, weight: 26 },
@@ -34,70 +27,23 @@
     { name: "神话", color: "#ff6372", mult: 10, weight: .7 }
   ];
   const SLOT_NAMES = { weapon: "武器", armor: "护甲", relic: "饰品" };
-  const SLOT_ICONS = { weapon: "⚔", armor: "◆", relic: "✦" };
-  const HERO_DEFS = [
-    { id: "yutong", name: "王宇彤", role: "铁壁守卫", roleClass: "tank", baseHp: 280, baseAtk: 11, baseDef: 15, interval: 1.25, color: "#e1b35b", skills: ["盾击", "守护壁垒", "威慑嘲讽", "不落城塞"] },
-    { id: "wangshang", name: "王尚", role: "暗影游侠", roleClass: "dps", baseHp: 135, baseAtk: 25, baseDef: 6, interval: .78, color: "#e7606c", skills: ["弩射", "暗影连击", "弱点标记", "百矢夜幕"] },
-    { id: "chongrui", name: "徐崇睿", role: "星辉祭司", roleClass: "support", baseHp: 170, baseAtk: 10, baseDef: 8, interval: 1.4, color: "#6edbd0", skills: ["星光弹", "星辉治愈", "勇气祝福", "命运回响"] }
-  ];
-  const TALENTS = {
-    guard: { name: "守御", desc: "生命、护盾与减伤", color: "#e0ad55" },
-    hunt: { name: "猎杀", desc: "攻击、暴击与Boss伤害", color: "#e05e69" },
-    star: { name: "星辉", desc: "治疗、金币、经验与掉落", color: "#67d3ca" }
-  };
-  const BONFIRE_NODE_TYPES = ["attack", "vitality", "gold", "xp", "gear", "all"];
-  const BONFIRE_NODE_NAMES = { attack: "锋芒", vitality: "坚韧", gold: "丰饶", xp: "启悟", gear: "寻宝", all: "恒火" };
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const dom = {};
+  const { initialState, mergeState } = globalThis.AbyssSaveState;
+  const safeStorageRemove = key => globalThis.AbyssSaveState.safeStorageRemove(localStorage, key);
   let state = loadState();
   let runtime = createRuntime();
   let activeTab = "team";
   let drawerOpen = false;
+  let drawerReturnFocus = null;
+  let modalReturnFocus = null;
   let lastFrame = performance.now();
   let lastRender = 0;
   let lastSave = performance.now();
-  let sessionOpenAt = Date.now();
-
   // v3 是全新数值版本：按产品约定直接移除旧版存档，不执行迁移或备份。
-  LEGACY_SAVE_KEYS.forEach(key => localStorage.removeItem(key));
-
-  function initialState() {
-    return {
-      version: SAVE_VERSION, stage: 1, bestStage: 1, gold: 40, dust: 0, embers: 0, totalKills: 0,
-      rebirths: 0, speed: 1, completed: false, lastSavedAt: Date.now(), activeBossStage: 0,
-      heroes: HERO_DEFS.map(() => ({ level: 1, xp: 0, training: 0, skillLevels: [1, 0, 0, 0], gear: { weapon: null, armor: null, relic: null } })),
-      bag: [], talents: { guard: 0, hunt: 0, star: 0, guardCore: false, huntCore: false, starCore: false },
-      autoTrain: { enabled: true, priority: "智能" }, autoSalvage: { 普通: true, 稀有: true, 史诗: true },
-      codex: { bosses: [], enemies: [], gear: [] }, firstZoneSeen: [0], firstBossSeen: [],
-      autoLog: [], autoTotals: { training: 0, skills: 0, equips: 0, enhances: 0 },
-      bonfire: { level: 0, autoRebirth: true, bossFailures: 0, lastRebirthStage: 0 },
-      settings: { showDamage: true, uiScale: 100, highContrast: false, reduceMotion: false, particles: true, autoMaxSpeed: true },
-      guide: { step: 0, dismissed: false }
-    };
-  }
-
-  function mergeState(saved) {
-    const base = initialState();
-    if (!saved || typeof saved !== "object") return base;
-    const merged = { ...base, ...saved };
-    merged.heroes = base.heroes.map((h, i) => ({ ...h, ...(saved.heroes?.[i] || {}), gear: { ...h.gear, ...(saved.heroes?.[i]?.gear || {}) } }));
-    merged.talents = { ...base.talents, ...(saved.talents || {}) };
-    merged.autoTrain = { ...base.autoTrain, ...(saved.autoTrain || {}) };
-    merged.autoSalvage = { ...base.autoSalvage, ...(saved.autoSalvage || {}) };
-    merged.codex = { ...base.codex, ...(saved.codex || {}) };
-    merged.autoTotals = { ...base.autoTotals, ...(saved.autoTotals || {}) };
-    merged.bonfire = { ...base.bonfire, ...(saved.bonfire || {}) };
-    merged.autoLog = Array.isArray(saved.autoLog) ? saved.autoLog.slice(0, 30) : [];
-    merged.bag = [];
-    merged.settings = { ...base.settings, ...(saved.settings || {}) };
-    merged.guide = { ...base.guide, ...(saved.guide || {}) };
-    merged.version = SAVE_VERSION;
-    merged.stage = clamp(Math.floor(merged.stage || 1), 1, MAX_STAGE);
-    merged.bestStage = clamp(Math.floor(merged.bestStage || 1), 1, MAX_STAGE);
-    return merged;
-  }
+  LEGACY_SAVE_KEYS.forEach(key => safeStorageRemove(key));
 
   function loadState() {
     try {
@@ -134,12 +80,12 @@
 
   function createRuntime() {
     const r = {
-      enemy: null, timer: 12, enemyAttack: 1.2, bossAttackCount: 0, retryAt: 0, retryRemaining: 0,
+      enemy: null, timer: 12, enemyAttack: 1.2, bossAttackCount: 0, retryAt: 0, retryRemaining: 0, transitionRemaining: 0,
       battleStage: state.stage, stats: [], paused: false, pendingSpawn: false,
-      backgroundMode: false,
+      backgroundMode: false, introSlow: false, introToken: 0,
       autoFeedExpanded: false, autoFeedSignature: "",
       autoSummary: { elapsed: 0, training: 0, skills: 0, enhances: 0 },
-      heroes: HERO_DEFS.map(() => ({ hp: 1, maxHp: 1, energy: 0, attackCd: .2 + Math.random() * .5, skillCd: 2.2, shield: 0, alive: true }))
+      heroes: HERO_DEFS.map(() => ({ hp: 1, maxHp: 1, energy: 0, attackCd: .2 + Math.random() * .5, skillCd: 2.2, shield: 0, corrosion: 0, alive: true }))
     };
     return r;
   }
@@ -154,7 +100,7 @@
       dps: $("#dpsValue"), heal: $("#healValue"), nextBossStage: $("#nextBossStage"), nextBossName: $("#nextBossName"), nextBossDesc: $("#nextBossDesc"),
       bossPortrait: $("#bossPortrait"), retryText: $("#retryText"), challengeBtn: $("#challengeBtn"), dropPreview: $("#dropPreview"),
       milestoneTitle: $("#milestoneTitle"), milestoneBar: $("#milestoneBar"), milestoneText: $("#milestoneText"), tabContent: $("#tabContent"),
-      bagBadge: $("#bagBadge"), saveState: $("#saveState"), fx: $("#fxLayer"), damage: $("#damageLayer"),
+      saveState: $("#saveState"), fx: $("#fxLayer"), damage: $("#damageLayer"),
       bossIntro: $("#bossIntro"), bossTitle: $("#bossTitle"), victory: $("#victoryOverlay"), modal: $("#modal"), modalBody: $("#modalBody"),
       sideDrawer: $("#sideDrawer"), drawerTitle: $("#drawerTitle"), drawerClose: $("#drawerClose"), drawerScrim: $("#drawerScrim"),
       bossWinChance: $("#bossWinChance"), guideTip: $("#guideTip")
@@ -168,6 +114,7 @@
     spawnStage(state.stage, true);
     renderTab();
     render(true);
+    if (state.completed) dom.victory.classList.remove("hidden");
     if (state.pendingOffline) {
       const report = state.pendingOffline;
       delete state.pendingOffline;
@@ -295,12 +242,16 @@
     dom.modal.addEventListener("click", e => { if (e.target === dom.modal) closeModal(); });
     window.addEventListener("keydown", e => {
       if (e.key === "Escape") { if (!dom.modal.classList.contains("hidden")) closeModal(); else closeDrawer(); }
+      if (e.key === "Tab" && !dom.modal.classList.contains("hidden")) trapFocus(e, dom.modal);
+      else if (e.key === "Tab" && drawerOpen) trapFocus(e, dom.sideDrawer);
       if ((e.key === "Enter" || e.key === " ") && e.target?.classList?.contains("hero-card")) { e.preventDefault(); openDrawer("team"); }
     });
+    document.addEventListener("visibilitychange", handleVisibilityChange);
   }
 
   function openDrawer(tab = "team") {
     const titles = { team: "队伍成长", codex: "深渊图鉴", rebirth: "篝火星图", settings: "远征设置" };
+    if (!drawerOpen) drawerReturnFocus = document.activeElement;
     activeTab = tab;
     drawerOpen = true;
     dom.drawerTitle.textContent = titles[tab] || "远征整备";
@@ -309,6 +260,7 @@
     dom.drawerScrim.classList.add("open");
     $$(".tab-btn").forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
     renderTab();
+    setTimeout(() => focusFirst(dom.sideDrawer), 0);
   }
 
   function closeDrawer() {
@@ -317,31 +269,61 @@
     dom.sideDrawer.setAttribute("aria-hidden", "true");
     dom.drawerScrim.classList.remove("open");
     $$(".tab-btn").forEach(button => button.classList.remove("active"));
+    if (drawerReturnFocus?.focus) drawerReturnFocus.focus();
+    drawerReturnFocus = null;
+  }
+
+  function focusableElements(container) {
+    if (!container?.querySelectorAll) return [];
+    return [...container.querySelectorAll('button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')].filter(element => !element.hidden && element.getAttribute?.("aria-hidden") !== "true");
+  }
+
+  function focusFirst(container) { focusableElements(container)[0]?.focus(); }
+
+  function trapFocus(event, container) {
+    const elements = focusableElements(container);
+    if (!elements.length) return;
+    const first = elements[0], last = elements[elements.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      saveState(false);
+      stopSpriteAnimation(dom.enemySprite);
+      $$(".battle-hero").forEach(stopSpriteAnimation);
+      return;
+    }
+    loop(performance.now());
+    updateEnemySprite();
+    runtime.heroes.forEach((hero, index) => { if (hero.alive) setHeroAction(index, "idle"); });
+    render(true);
   }
 
   function loop(now = performance.now()) {
     const elapsed = Math.max(0, (now - lastFrame) / 1000);
     lastFrame = now;
     if (!runtime.paused && !state.completed) {
-      if (elapsed > 2) simulateBackground(elapsed * state.speed);
-      else { maybeAutoChallenge(elapsed); simulateForeground(Math.min(elapsed, .5) * state.speed); }
+      const speed = currentSpeed();
+      if (elapsed > 2) simulateBackground(elapsed * speed);
+      else { maybeAutoChallenge(elapsed); simulateForeground(Math.min(elapsed, .5) * speed); }
     }
-    if (now - lastRender > 180) { render(); lastRender = now; }
+    if (!document.hidden && now - lastRender > 180) { render(); lastRender = now; }
     if (now - lastSave > 5000) { saveState(false); lastSave = now; }
   }
 
   function spawnStage(stage, fresh = false) {
     runtime.battleStage = clamp(stage, 1, MAX_STAGE);
-    const zoneIndex = zoneOf(stage);
+    const baseEnemy = enemyStats(runtime.battleStage);
+    const { zoneIndex, boss, elite, evo, enemyType } = baseEnemy;
     scheduleZonePreload(zoneIndex);
-    const boss = stage % 100 === 0;
-    const elite = !boss && stage % 10 === 0;
-    const power = Math.pow(ENEMY_HP_GROWTH, stage - 1) * (1 + zoneIndex * .42);
-    let hp = 115 * power * (boss ? 17 : elite ? 3.1 : 1);
-    const atk = 10 * Math.pow(ENEMY_ATK_GROWTH, stage - 1) * (boss ? 2.8 : elite ? 1.5 : 1);
-    const evo = bossEvolution(stage);
-    const enemyType = (stage - 1) % 3;
-    runtime.enemy = { maxHp: hp, hp, atk, boss, elite, zoneIndex, evo, enemyType, debuff: 0 };
+    const hp = baseEnemy.hp, atk = baseEnemy.atk;
+    runtime.enemy = {
+      maxHp: hp, hp, atk, boss, elite, zoneIndex, evo, enemyType, debuff: 0,
+      shell: boss && zoneIndex === 1 ? 5 + Math.ceil((evo + 1) / 2) : 0,
+      abyssShield: boss && zoneIndex === 9 ? hp * (.04 + evo * .004) : 0
+    };
     runtime.timer = boss ? 30 : 12;
     runtime.enemyAttack = boss ? 1.05 : 1.35;
     runtime.bossAttackCount = 0;
@@ -362,7 +344,7 @@
   function resetPartyRuntime() {
     runtime.heroes.forEach((hero, i) => {
       const stats = heroStats(i);
-      hero.maxHp = stats.hp; hero.hp = stats.hp; hero.energy = 0; hero.attackCd = .2 + i * .2; hero.skillCd = 2 + i; hero.shield = 0; hero.alive = true;
+      hero.maxHp = stats.hp; hero.hp = stats.hp; hero.energy = 0; hero.attackCd = .2 + i * .2; hero.skillCd = 2 + i; hero.shield = 0; hero.corrosion = 0; hero.alive = true;
     });
   }
 
@@ -377,7 +359,8 @@
   }
 
   function simulateDetailed(dt) {
-    if (!runtime.enemy || runtime.pendingSpawn) return;
+    if (runtime.pendingSpawn) { advanceTransition(dt); return; }
+    if (!runtime.enemy) return;
     runtime.timer -= dt;
     runtime.enemyAttack -= dt;
     runtime.heroes.forEach((hero, i) => {
@@ -395,6 +378,7 @@
   }
 
   function nextCombatEvent(remaining) {
+    if (runtime.pendingSpawn) return Math.max(.001, Math.min(remaining, runtime.transitionRemaining || KILL_TRANSITION_SECONDS));
     const heroEvents = runtime.heroes.flatMap((hero, i) => {
       if (!hero.alive) return [];
       const events = [hero.attackCd];
@@ -409,7 +393,7 @@
     let remaining = seconds;
     let safety = 0;
     runtime.backgroundMode = false;
-    while (remaining > 0 && safety++ < 1000 && !state.completed && runtime.enemy && !runtime.pendingSpawn) {
+    while (remaining > 0 && safety++ < 1000 && !state.completed && runtime.enemy) {
       const nextEvent = nextCombatEvent(remaining);
       simulateDetailed(nextEvent);
       remaining -= nextEvent;
@@ -417,7 +401,15 @@
   }
 
   function simulateBackground(seconds) {
-    let remaining = seconds;
+    let remaining = Math.max(0, seconds);
+    const detailed = Math.min(remaining, DETAILED_BACKGROUND_WINDOW);
+    simulateBackgroundDetailed(detailed);
+    remaining -= detailed;
+    if (remaining > 0 && !state.completed) simulateBackgroundFast(remaining);
+  }
+
+  function simulateBackgroundDetailed(seconds) {
+    let remaining = Math.max(0, seconds);
     let safety = 0;
     runtime.backgroundMode = true;
     while (remaining > 0 && safety++ < 200000 && !state.completed) {
@@ -434,6 +426,84 @@
       }
     }
     runtime.backgroundMode = false;
+  }
+
+  function estimateFastBattle() {
+    const enemy = runtime.enemy;
+    if (!enemy) return { won: false, seconds: .1 };
+    const family = enemy.boss ? enemy.zoneIndex : -1;
+    let dps = Math.max(1, estimatedDps() * (enemy.debuff > 0 ? 1.16 : 1));
+    if (family === 1 && enemy.shell > 0) dps *= .88;
+    if (family === 2) dps = Math.max(1, dps - enemy.maxHp * (.007 + enemy.evo * .0007) / (enemyAttackInterval(enemy) * 4));
+    const effectiveHp = enemy.hp + (enemy.abyssShield || 0);
+    const killSeconds = effectiveHp / dps;
+    const partyEhp = runtime.heroes.reduce((sum, hero, index) => hero.alive ? sum + hero.hp + hero.shield + heroStats(index).def * 7 : sum, 0);
+    const healing = runtime.heroes[2].alive && state.heroes[2].skillLevels[1] > 0 ? heroStats(2).heal * .32 : 0;
+    const attackInterval = enemyAttackInterval(enemy);
+    let danger = enemy.boss ? .94 : .72;
+    if (family === 0) danger *= 1.18;
+    if (family === 3 && enemy.hp / enemy.maxHp < .4) danger *= 1.45;
+    if (family === 4) danger *= 1.16;
+    if (family === 5) danger *= 1.2;
+    if (family === 8) danger *= 1.12;
+    if (family === 9) danger *= 1.28;
+    const incoming = Math.max(1, enemy.atk / attackInterval * danger - healing);
+    const surviveSeconds = partyEhp / incoming;
+    const limit = Math.max(.25, Math.min(runtime.timer, surviveSeconds));
+    return { won: killSeconds <= limit, seconds: Math.max(.25, Math.min(killSeconds, limit)), dps };
+  }
+
+  function simulateBackgroundFast(seconds) {
+    let remaining = Math.max(0, seconds);
+    let safety = 0;
+    runtime.backgroundMode = true;
+    while (remaining > .0001 && safety++ < 50000 && !state.completed) {
+      if (!runtime.enemy) spawnStage(state.stage, true);
+      if (runtime.pendingSpawn) {
+        const step = Math.min(remaining, runtime.transitionRemaining || KILL_TRANSITION_SECONDS);
+        advanceTransition(step);
+        remaining -= step;
+        continue;
+      }
+      if (state.activeBossStage && runtime.retryRemaining <= 0 && runtime.battleStage !== state.activeBossStage) {
+        immediateChallenge();
+        continue;
+      }
+      const result = estimateFastBattle();
+      const step = Math.min(remaining, result.seconds);
+      runtime.timer = Math.max(0, runtime.timer - step);
+      runtime.enemyAttack = Math.max(.001, runtime.enemyAttack - step);
+      processAutoTrain(step);
+      if (state.activeBossStage && runtime.battleStage !== state.activeBossStage) {
+        runtime.retryRemaining = Math.max(0, runtime.retryRemaining - step / state.speed);
+        runtime.retryAt = Date.now() + runtime.retryRemaining * 1000;
+      }
+      remaining -= step;
+      if (step + .0001 < result.seconds) {
+        const dealt = result.dps * step;
+        if (runtime.enemy.abyssShield > 0) {
+          const absorbed = Math.min(runtime.enemy.abyssShield, dealt);
+          runtime.enemy.abyssShield -= absorbed;
+          runtime.enemy.hp = Math.max(1, runtime.enemy.hp - Math.max(0, dealt - absorbed));
+        } else runtime.enemy.hp = Math.max(1, runtime.enemy.hp - dealt);
+        continue;
+      }
+      if (result.won) {
+        runtime.enemy.hp = 0;
+        winStage(true);
+      } else {
+        runtime.enemy.hp = Math.max(1, runtime.enemy.hp * .12);
+        failStage(true);
+      }
+    }
+    flushAutoSummary(true);
+    runtime.backgroundMode = false;
+  }
+
+  function advanceTransition(dt) {
+    if (!runtime.pendingSpawn) return;
+    runtime.transitionRemaining = Math.max(0, runtime.transitionRemaining - dt);
+    if (runtime.transitionRemaining <= 0) advanceAfterWin();
   }
 
   function heroAttack(i) {
@@ -454,14 +524,17 @@
     const level = Math.max(1, state.heroes[i].skillLevels[1]);
     hero.skillCd = i === 0 ? 8 : i === 1 ? 5 : 6;
     if (i === 0) {
-      runtime.heroes.forEach((target, j) => { if (target.alive) target.shield += heroStats(0).hp * (.12 + level * .012); });
+      const tier = skillEvolutionTier(state.heroes[0].level);
+      runtime.heroes.forEach(target => { if (target.alive) target.shield += heroStats(0).hp * (.12 + level * .012) * (1 + tier * .16); });
       toastMini("守护壁垒", 31, 37);
     } else if (i === 1) {
-      const damage = heroStats(1).atk * (2.25 + level * .12);
+      const tier = skillEvolutionTier(state.heroes[1].level);
+      const damage = heroStats(1).atk * (2.25 + level * .12) * (1 + tier * .22);
       dealDamage(damage, i, Math.random() < heroStats(1).crit);
       runtime.enemy.debuff = 5;
     } else {
-      const power = heroStats(2).heal * (1.9 + level * .1);
+      const tier = skillEvolutionTier(state.heroes[2].level);
+      const power = heroStats(2).heal * (1.9 + level * .1) * (1 + tier * .2);
       const targetIndex = runtime.heroes.reduce((best, h, idx, arr) => h.alive && h.hp / h.maxHp < arr[best].hp / arr[best].maxHp ? idx : best, 0);
       healHero(targetIndex, power);
       runtime.heroes.forEach(h => { if (h.alive) h.energy = Math.min(100, h.energy + 8); });
@@ -473,15 +546,16 @@
     const hero = runtime.heroes[i];
     hero.energy = 0;
     if (i === 0) {
-      runtime.heroes.forEach(h => { if (h.alive) h.shield += heroStats(0).hp * .55; });
+      const tier = skillEvolutionTier(state.heroes[0].level);
+      runtime.heroes.forEach(h => { if (h.alive) h.shield += heroStats(0).hp * .55 * (1 + tier * .18); });
       toast("王宇彤释放「不落城塞」");
     } else if (i === 1) {
-      dealDamage(heroStats(1).atk * 7.5, i, true);
+      dealDamage(heroStats(1).atk * 7.5 * (1 + skillEvolutionTier(state.heroes[1].level) * .25), i, true);
       toast("王尚释放「百矢夜幕」");
     } else {
       const down = runtime.heroes.findIndex(h => !h.alive);
       if (down >= 0) {
-        const stats = heroStats(down); runtime.heroes[down].alive = true; runtime.heroes[down].maxHp = stats.hp; runtime.heroes[down].hp = stats.hp * .45; runtime.heroes[down].shield = stats.hp * .2;
+        const stats = heroStats(down), tier = skillEvolutionTier(state.heroes[2].level); runtime.heroes[down].alive = true; runtime.heroes[down].maxHp = stats.hp; runtime.heroes[down].hp = stats.hp * (.45 + tier * .12); runtime.heroes[down].shield = stats.hp * (.2 + tier * .08);
         if (!runtime.backgroundMode) setHeroAction(down, "idle"); toast(`徐崇睿以「命运回响」复活了${HERO_DEFS[down].name}`);
       } else runtime.heroes.forEach((h, idx) => healHero(idx, heroStats(2).heal * 2.8));
     }
@@ -491,30 +565,54 @@
   function enemyAttack() {
     const e = runtime.enemy;
     if (!runtime.backgroundMode) setEnemyAction("attack");
-    runtime.enemyAttack += e.boss ? 1.05 : 1.35;
+    const interval = enemyAttackInterval(e);
+    runtime.enemyAttack += interval;
     runtime.bossAttackCount++;
     const alive = runtime.heroes.map((h, i) => h.alive ? i : -1).filter(i => i >= 0);
     if (!alive.length) return;
-    const aoe = e.boss && runtime.bossAttackCount % 4 === 0;
-    const targets = aoe ? alive : [alive.includes(0) ? 0 : alive[Math.floor(Math.random() * alive.length)]];
+    const family = e.boss ? e.zoneIndex : -1;
+    const aoe = e.boss && ((family === 0 && runtime.bossAttackCount % 4 === 0) || (family === 9 && runtime.bossAttackCount % 3 === 0));
+    let targets = aoe ? alive : [alive.includes(0) ? 0 : alive[Math.floor(Math.random() * alive.length)]];
+    if (family === 4 && runtime.bossAttackCount % 3 === 0 && alive.length > 1) targets = alive.slice(0, 2);
     targets.forEach(i => {
       const target = runtime.heroes[i];
       const stats = heroStats(i);
       let damage = Math.max(1, e.atk * (.9 + Math.random() * .2) - stats.def * .65);
+      if (family === 3 && e.hp / e.maxHp < .4) damage *= 1.45 + e.evo * .015;
+      if (family === 5) damage *= 1 + target.corrosion * .07;
+      if (family === 8 && target.hp / target.maxHp < .35) damage *= 1.7 + e.evo * .02;
       if (runtime.enemy.debuff > 0) damage *= .82;
       damage *= 1 / bonfireMultiplier("vitality");
       if (target.shield > 0) { const absorbed = Math.min(target.shield, damage); target.shield -= absorbed; damage -= absorbed; }
       target.hp = Math.max(0, target.hp - damage);
       if (!runtime.backgroundMode) { floatNumber(format(damage), 18 + i * 11, 55, false, false); setHeroAction(i, "hit"); }
       if (target.hp <= 0) { target.alive = false; if (!runtime.backgroundMode) setHeroAction(i, "down"); }
+      if (family === 5 && target.alive) target.corrosion = Math.min(8, target.corrosion + 1);
     });
-    if (e.debuff > 0) e.debuff -= e.boss ? 1.05 : 1.35;
+    if (family === 2 && runtime.bossAttackCount % 4 === 0) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * (.007 + e.evo * .0007));
+    if (family === 6 && runtime.bossAttackCount % 4 === 0 && runtime.heroes[1].alive) runtime.heroes[1].attackCd += 1.1 + e.evo * .04;
+    if (family === 7 && runtime.bossAttackCount % 3 === 0) runtime.heroes.forEach(hero => { if (hero.alive) hero.energy = Math.max(0, hero.energy - 18 - e.evo); });
+    if (e.debuff > 0) e.debuff -= interval;
     if (!runtime.backgroundMode) dom.enemyUnit.classList.remove("hit");
+  }
+
+  function enemyAttackInterval(enemy) {
+    if (!enemy?.boss) return 1.35;
+    if (enemy.zoneIndex === 3 && enemy.hp / Math.max(1, enemy.maxHp) < .4) return Math.max(.58, .82 - enemy.evo * .012);
+    return 1.05;
   }
 
   function dealDamage(amount, heroIndex, crit = false) {
     if (!runtime.enemy || runtime.enemy.hp <= 0) return;
-    const damage = Math.min(runtime.enemy.hp, Math.max(1, amount));
+    const enemy = runtime.enemy;
+    if (enemy.boss && enemy.zoneIndex === 1 && enemy.shell > 0) { amount *= .66; enemy.shell--; }
+    if (enemy.boss && enemy.zoneIndex === 9 && enemy.abyssShield > 0) {
+      const absorbed = Math.min(enemy.abyssShield, Math.max(1, amount));
+      enemy.abyssShield -= absorbed;
+      amount -= absorbed;
+      if (amount <= 0) return;
+    }
+    const damage = Math.min(enemy.hp, Math.max(1, amount));
     runtime.enemy.hp -= damage;
     runtime.stats.push({ at: Date.now(), type: "damage", value: damage });
     if (!runtime.backgroundMode && state.settings.showDamage) floatNumber(format(damage), 72 + visualRandom() * 10, 34 + visualRandom() * 16, crit, false);
@@ -538,27 +636,28 @@
     const defeated = runtime.enemy;
     if (!defeated) return;
     runtime.pendingSpawn = true;
+    runtime.transitionRemaining = KILL_TRANSITION_SECONDS;
     state.totalKills++;
     const rewardMult = bonfireMultiplier("gold");
     const gold = (12 + runtime.battleStage * .85) * (defeated.boss ? 12 : defeated.elite ? 3 : 1) * rewardMult;
     const xp = (8 + runtime.battleStage * .48) * (defeated.boss ? 8 : defeated.elite ? 2 : 1) * rewardMult;
     state.gold += gold;
-    state.heroes.forEach(h => addXpRaw(h, xp));
+    state.heroes.forEach((h, i) => addXpRaw(h, xp * bonfireMultiplier("xp"), i));
     if (defeated.boss) {
       const first = !state.codex.bosses.includes(runtime.battleStage);
       if (first) { state.codex.bosses.push(runtime.battleStage); state.embers += 2 + Math.floor(runtime.battleStage / 500); generateGear(true); recordAuto(`首胜 ${bossName(runtime.battleStage)} · 第${runtime.battleStage}关`, true); toast(`首胜！获得灵魂余烬与保底装备`); }
       else if (Math.random() < .08) generateGear(false);
     } else if (Math.random() < (.075 * bonfireMultiplier("gear"))) generateGear(false);
-    if (defeated.boss) state.bonfire.bossFailures = 0;
-    if (background) advanceAfterWin();
-    else {
+    state.bonfire.bossFailures = 0;
+    if (!background) {
       dom.enemyUnit.classList.add("dead");
-      setTimeout(() => { dom.enemyUnit.classList.remove("dead"); advanceAfterWin(); }, 480 / state.speed);
     }
   }
 
   function advanceAfterWin() {
     runtime.pendingSpawn = false;
+    runtime.transitionRemaining = 0;
+    dom.enemyUnit?.classList.remove("dead");
     if (runtime.battleStage >= MAX_STAGE) {
       state.stage = MAX_STAGE; state.bestStage = MAX_STAGE; state.completed = true; dom.victory.classList.remove("hidden"); saveState(); return;
     }
@@ -586,17 +685,18 @@
       state.stage = Math.max(1, failedStage - 1);
       if (!background) toast(`${bossName(failedStage)}挑战失败，退回前一关整备`, true);
     } else {
+      state.bonfire.bossFailures++;
       const progress = runtime.enemy ? clamp(1 - runtime.enemy.hp / Math.max(1, runtime.enemy.maxHp), .05, .9) : .05;
       const gold = (12 + failedStage * .85) * .18 * progress * bonfireMultiplier("gold");
       const xp = (8 + failedStage * .48) * .14 * progress;
       state.gold += gold;
-      state.heroes.forEach(hero => addXpRaw(hero, xp));
+      state.heroes.forEach((hero, i) => addXpRaw(hero, xp * bonfireMultiplier("xp"), i));
       state.stage = Math.max(1, failedStage);
     }
     resetPartyRuntime();
     runtime.pendingSpawn = false;
     spawnStage(state.stage, true);
-    if (isBoss && shouldAutoRebirth()) performRebirth(true);
+    if (shouldAutoRebirth()) performRebirth(true);
   }
 
   function immediateChallenge() {
@@ -673,12 +773,17 @@
 
   function heroStats(i) {
     const def = HERO_DEFS[i], hero = state.heroes[i];
-    const levelMult = 1 + (hero.level - 1) * .075;
+    const effectiveLevel = Math.min(hero.level, 100);
+    const levelMult = 1 + (effectiveLevel - 1) * .075;
     const trainMult = 1 + hero.training * .09;
     let atk = def.baseAtk * levelMult * trainMult;
     let hp = def.baseHp * levelMult * trainMult;
-    let defense = def.baseDef * (1 + (hero.level - 1) * .055) * (1 + hero.training * .065);
+    let defense = def.baseDef * (1 + (effectiveLevel - 1) * .055) * (1 + hero.training * .065);
     let crit = i === 1 ? .14 : .05, critDmg = i === 1 ? 1.85 : 1.55, heal = i === 2 ? atk * 2.3 : atk;
+    const evolution = skillEvolutionTier(hero.level);
+    if (i === 0) { hp *= 1 + evolution * .14; defense *= 1 + evolution * .12; }
+    if (i === 1) { atk *= 1 + evolution * .13; crit += evolution * .035; }
+    if (i === 2) heal *= 1 + evolution * .16;
     Object.values(hero.gear).filter(Boolean).forEach(g => {
       const value = gearValue(g);
       if (g.slot === "weapon") atk += value;
@@ -689,24 +794,30 @@
     defense *= bonfireMultiplier("vitality") * bonfireMultiplier("all");
     atk *= bonfireMultiplier("attack") * bonfireMultiplier("all");
     heal *= bonfireMultiplier("vitality") * bonfireMultiplier("all");
-    return { hp, atk, def: defense, crit: Math.min(.65, crit), critDmg, heal, haste: Math.min(.6, hero.level * .0007), bossDamage: bonfireMultiplier("attack") };
+    return { hp, atk, def: defense, crit: Math.min(.65, crit), critDmg, heal, haste: Math.min(.6, effectiveLevel * .0007), bossDamage: bonfireMultiplier("attack") };
   }
 
   function teamPower() { return HERO_DEFS.reduce((sum, _, i) => { const s = heroStats(i); return sum + s.atk * 8 + s.hp * .8 + s.def * 10; }, 0); }
   function estimatedDps() { return HERO_DEFS.reduce((sum, def, i) => { const s = heroStats(i); return sum + s.atk / def.interval * (1 + s.crit * (s.critDmg - 1)) * (i === 1 ? 1.28 : 1.12); }, 0) * (runtime.enemy?.boss ? bonfireMultiplier("attack") : 1); }
   function offlineRates(s = state) { const floor = Math.max(1, Math.min(s.stage, s.bestStage)); const level = s.bonfire?.level || 0; const goldNodes = countBonfireType("gold", level) + countBonfireType("all", level) * .375; const xpNodes = countBonfireType("xp", level) + countBonfireType("all", level) * .375; return { gold: (.7 + floor * .025) * (1 + goldNodes * .04), xp: (.42 + floor * .014) * (1 + xpNodes * .04) }; }
 
-  function addXpRaw(hero, amount) {
+  function addXpRaw(hero, amount, heroIndex = -1) {
+    const previousLevel = hero.level;
     hero.xp += amount;
     let needed = xpNeeded(hero.level);
     while (hero.xp >= needed) { hero.xp -= needed; hero.level++; unlockSkills(hero); needed = xpNeeded(hero.level); }
+    if (heroIndex >= 0) for (const milestone of [100, 200]) if (previousLevel < milestone && hero.level >= milestone) {
+      const title = milestone === 100 ? "精研" : "觉醒";
+      recordAuto(`${HERO_DEFS[heroIndex].name}达到${milestone}级，技能${title}`, true);
+      toast(`${HERO_DEFS[heroIndex].name}技能${title}！`);
+    }
   }
   function unlockSkills(hero) {
     if (hero.level >= 10 && hero.skillLevels[1] === 0) hero.skillLevels[1] = 1;
     if (hero.level >= 25 && hero.skillLevels[2] === 0) hero.skillLevels[2] = 1;
     if (hero.level >= 50 && hero.skillLevels[3] === 0) hero.skillLevels[3] = 1;
   }
-  function xpNeeded(level) { return 55 * Math.pow(1.145, level - 1); }
+  function skillEvolutionName(level) { return ["初式", "精研", "觉醒"][skillEvolutionTier(level)]; }
   function trainCost(i) { const h = state.heroes[i]; return Math.floor(25 * Math.pow(1.18, h.training) * (1 + i * .04)); }
   function skillCost(i, skill) { const level = state.heroes[i].skillLevels[skill]; return Math.floor(70 * Math.pow(1.42, level) * (1 + skill * .7)); }
   function buyTraining(i, notify = true) { const cost = trainCost(i); if (state.gold < cost) { if (notify) toast("金币不足", true); return false; } state.gold -= cost; state.heroes[i].training++; state.autoTotals.training++; refreshPartyStats(); renderTab(); return true; }
@@ -715,8 +826,14 @@
 
   function generateGear(guaranteed = false) {
     const stage = runtime.battleStage;
-    const slot = ["weapon","armor","relic"][Math.floor(Math.random()*3)];
-    const heroIndex = Math.floor(Math.random() * HERO_DEFS.length);
+    let slot, heroIndex;
+    if (guaranteed) {
+      const weakest = state.heroes.flatMap((hero, index) => Object.entries(hero.gear).map(([gearSlot, item]) => ({ heroIndex: index, slot: gearSlot, value: item ? gearValue(item) : 0 }))).sort((a, b) => a.value - b.value)[0];
+      slot = weakest.slot; heroIndex = weakest.heroIndex;
+    } else {
+      slot = ["weapon","armor","relic"][Math.floor(Math.random()*3)];
+      heroIndex = Math.floor(Math.random() * HERO_DEFS.length);
+    }
     const floorRarity = guaranteed ? Math.min(4, Math.floor((stage - 1) / 2000)) : 0;
     const roll = Math.random() * 100;
     let acc = 0, rarityIndex = 0;
@@ -736,7 +853,6 @@
     } else {
       state.dust += salvageValue(item);
     }
-    state.bag = [];
     const enhanced = autoEnhanceGear(12);
     runtime.autoSummary.enhances += enhanced;
     refreshPartyStats();
@@ -783,35 +899,10 @@
     runtime.autoSummary = { elapsed: 0, training: 0, skills: 0, enhances: 0 };
   }
 
-  function equipBest(heroIndex) {
-    ["weapon","armor","relic"].forEach(slot => {
-      const current = state.heroes[heroIndex].gear[slot];
-      const candidates = state.bag.filter(g => g.slot === slot).concat(current ? [current] : []).sort((a,b)=>gearValue(b)-gearValue(a));
-      const best = candidates[0]; if (!best || best === current) return;
-      state.bag = state.bag.filter(g => g.id !== best.id);
-      if (current) state.bag.unshift(current);
-      state.heroes[heroIndex].gear[slot] = best;
-    });
-    resetPartyRuntime(); renderTab(); toast(`${HERO_DEFS[heroIndex].name}已换上最高战力装备`);
-  }
-
-  function salvageItem(id) {
-    const idx = state.bag.findIndex(g => g.id === id); if (idx < 0) return;
-    const item = state.bag[idx]; if (item.locked) { toast("已锁定装备无法分解", true); return; }
-    state.dust += salvageValue(item); state.bag.splice(idx,1); renderTab();
-  }
-  function enhanceEquipped(heroIndex, slot) {
-    const item = state.heroes[heroIndex].gear[slot]; if (!item) return;
-    if (item.enhance >= 20) { toast("装备已强化至+20"); return; }
-    const cost = enhanceCost(item); if (state.dust < cost) { toast("强化粉尘不足", true); return; }
-    state.dust -= cost; item.enhance++; resetPartyRuntime(); renderTab();
-  }
-
   function bonfireNodeCost(level = state.bonfire.level) { return 1 + Math.floor(level / 6); }
   function countBonfireType(type, level = state.bonfire.level) {
-    let count = 0;
-    for (let i = 0; i < level; i++) if (BONFIRE_NODE_TYPES[i % BONFIRE_NODE_TYPES.length] === type) count++;
-    return count;
+    const index = BONFIRE_NODE_TYPES.indexOf(type);
+    return index < 0 || level <= index ? 0 : Math.floor((level - 1 - index) / BONFIRE_NODE_TYPES.length) + 1;
   }
   function bonfireMultiplier(type) {
     const perNode = { attack: .035, vitality: .035, gold: .04, xp: .04, gear: .025, all: .015 }[type] || 0;
@@ -861,10 +952,6 @@
     recordAuto(`${automatic?"智能":"手动"}重整：第${fromStage}关返回起点，点亮${lit}个星图节点`);
   }
   function rebirthReward() { return Math.max(1, Math.floor(Math.pow(state.bestStage / 100, .72) * 5)); }
-  function talentCost(branch) { return 1 + state.talents[branch]; }
-  function buyTalent(branch) { const level=state.talents[branch]; if(level>=10)return;const cost=talentCost(branch);if(state.embers<cost){toast("灵魂余烬不足",true);return;}state.embers-=cost;state.talents[branch]++;resetPartyRuntime();renderTab(); }
-  function buyCore(branch) { if(state.talents[branch]<10)return;const key=`${branch}Core`;if(state.talents[key])return;if(state.embers<20){toast("核心节点需要20余烬",true);return;}state.embers-=20;state.talents[key]=true;resetPartyRuntime();renderTab(); }
-  function resetTalents(){let refund=0;Object.keys(TALENTS).forEach(k=>{const n=state.talents[k];refund+=n*(n+1)/2;if(state.talents[`${k}Core`])refund+=20;state.talents[k]=0;state.talents[`${k}Core`]=false;});state.embers+=refund;resetPartyRuntime();renderTab();toast(`已返还${refund}灵魂余烬`);}
 
   function render(force = false) {
     if (!dom.stage) return;
@@ -882,12 +969,11 @@
       dom.enemyName.textContent = enemy.boss ? bossName(runtime.battleStage) : zone.enemies[enemy.enemyType];
       dom.enemyHpBar.style.width = `${Math.max(0, enemy.hp/enemy.maxHp*100)}%`;
       dom.enemyHpText.textContent = `${format(Math.max(0,enemy.hp))} / ${format(enemy.maxHp)}`;
-      dom.enemyTraits.textContent = enemy.boss ? `Boss · 进化${enemy.evo+1}` : enemy.elite ? "精英 · 强化掉落" : "普通";
+      dom.enemyTraits.textContent = enemy.boss ? `Boss · ${BOSS_MECHANICS[enemy.zoneIndex].name} · 进化${enemy.evo+1}` : enemy.elite ? "精英 · 强化掉落" : "普通";
       dom.timer.textContent = `${Math.max(0,runtime.timer).toFixed(1)}s`;
     }
     renderHeroes(); renderCombatStats(); renderProgress(); renderSpeed(); renderAutoFeed();
     if (drawerOpen && force) renderTab();
-    if (dom.bagBadge) { dom.bagBadge.textContent = ""; dom.bagBadge.classList.add("hidden"); }
   }
 
   function renderHeroes() {
@@ -895,7 +981,7 @@
     if (dom.heroCards.dataset.ready !== "true") {
       dom.heroCards.innerHTML = HERO_DEFS.map((def,i)=>`<article class="hero-card ${def.roleClass}" data-action="open-hero" data-hero="${i}" tabindex="0" role="button">
         <div class="hero-avatar" style="background-image:url('assets-v3/heroes/${def.id}/idle-1.webp')"></div>
-        <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level"></span>
+        <h3>${def.name}<span>${def.role}</span></h3><span class="hero-level"></span><b class="hero-evolution" data-ui="evolution"></b>
         <div class="mini-bars"><div class="mini-track"><div class="mini-fill hp"></div></div><div class="mini-track"><div class="mini-fill energy"></div></div></div>
         <div class="hero-stats"><span data-ui="health"></span><span data-ui="training"></span></div>
         <div class="hero-upgrade" data-ui="next-cost"></div>
@@ -911,6 +997,10 @@
       card.querySelector('[data-ui="health"]').textContent=`生命 ${format(r.hp)}/${format(r.maxHp)}`;
       card.querySelector('[data-ui="training"]').textContent=`培养 +${h.training}`;
       card.querySelector('[data-ui="next-cost"]').textContent=`下次自动培养 · ${format(trainCost(i))}金币`;
+      const evolution=skillEvolutionTier(h.level);
+      card.dataset.evolution=String(evolution);
+      card.querySelector('[data-ui="evolution"]').textContent=skillEvolutionName(h.level);
+      const sprite=$(`[data-hero="${i}"].battle-hero`);if(sprite)sprite.dataset.evolution=String(evolution);
     });
     const autoBtn=$("#autoTrainBtn");autoBtn.classList.remove("locked");autoBtn.textContent=`自动成长 · ${state.autoTrain.enabled?"开启":"暂停"}`;
   }
@@ -926,13 +1016,14 @@
     const toggle=dom.autoFeed.querySelector('[data-action="auto-feed-toggle"]');
     toggle.textContent=runtime.autoFeedExpanded?"收起":"展开";
     toggle.setAttribute("aria-expanded",String(runtime.autoFeedExpanded));
-    dom.autoFeedList.innerHTML=visible.map(entry=>`<p class="${entry.important?"important":""}"><time>${new Date(entry.at).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}</time><span>${entry.message}</span></p>`).join("");
+    dom.autoFeedList.innerHTML=visible.map(entry=>`<p class="${entry.important?"important":""}"><time>${new Date(entry.at).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}</time><span>${escapeHtml(entry.message)}</span></p>`).join("");
   }
   function trimStats(){const cutoff=Date.now()-30000;runtime.stats=runtime.stats.filter(x=>x.at>=cutoff);}
 
   function renderProgress(){
     const nextBoss=Math.min(MAX_STAGE,Math.ceil(runtime.battleStage/100)*100),zone=ZONES[zoneOf(nextBoss)],evo=bossEvolution(nextBoss);
-    dom.nextBossStage.textContent=`第${nextBoss}关`;dom.nextBossName.textContent=`${zone.boss} · ${EVOLUTIONS[evo]}`;dom.nextBossDesc.textContent=zone.desc;
+    const mechanic=BOSS_MECHANICS[zoneOf(nextBoss)];
+    dom.nextBossStage.textContent=`第${nextBoss}关`;dom.nextBossName.textContent=`${zone.boss} · ${EVOLUTIONS[evo]}`;dom.nextBossDesc.textContent=`${zone.desc} 特性「${mechanic.name}」：${mechanic.desc}。`;
     dom.bossPortrait.src=bossFrameUrl(zoneOf(nextBoss),evo);
     if(state.activeBossStage){const sec=Math.max(0,Math.ceil((runtime.retryAt-Date.now())/1000));dom.retryText.textContent=sec?`${sec}秒后自动挑战`:"准备重返Boss战";dom.challengeBtn.disabled=false;}else{dom.retryText.textContent="尚未遭遇";dom.challengeBtn.disabled=true;}
     dom.dropPreview.innerHTML=[["weapon","武器"],["armor","护甲"],["relic","饰品"]].map(([slot,name])=>`<div class="drop-slot"><b class="gear-icon" style="margin:auto;${gearIconStyle(slot,zoneOf(nextBoss)%5)}"></b>${name}</div>`).join("");
@@ -944,7 +1035,8 @@
     let target=100,title="第100关 · 篝火重整";if(state.bestStage>=100&&state.bestStage<1000){target=1000;title="第1000关 · 四倍速"}else if(state.bestStage>=1000){target=Math.min(MAX_STAGE,Math.ceil((state.bestStage+1)/1000)*1000);title=target===MAX_STAGE?"第10000关 · 永恒篝火":`第${target}关 · 新区域`;}
     const start=target<=100?0:target- (target>=1000?1000:target===500?400:500);const pct=clamp((state.bestStage-start)/(target-start)*100,0,100);dom.milestoneTitle.textContent=title;dom.milestoneBar.style.width=`${pct}%`;dom.milestoneText.textContent=state.bestStage>=MAX_STAGE?"万阶远征已经完成。":`再推进${Math.max(0,target-state.bestStage)}关。`;
   }
-  function renderSpeed(){const max=state.bestStage>=1000?4:state.bestStage>=100?2:1;if(state.settings.autoMaxSpeed!==false)state.speed=max;else if(state.speed>max)state.speed=max;$$('[data-speed]').forEach(b=>{const n=Number(b.dataset.speed);b.classList.toggle('locked',n>max);b.classList.toggle('active',n===state.speed);});}
+  function currentSpeed(){return runtime.introSlow?1:state.speed;}
+  function renderSpeed(){const max=state.bestStage>=1000?4:state.bestStage>=100?2:1;if(state.settings.autoMaxSpeed!==false)state.speed=max;else if(state.speed>max)state.speed=max;const active=currentSpeed();$$('[data-speed]').forEach(b=>{const n=Number(b.dataset.speed);b.classList.toggle('locked',n>max);b.classList.toggle('active',n===active);});}
 
   function renderTab(){
     if(!dom.tabContent)return;
@@ -953,15 +1045,9 @@
     if(activeTab==="rebirth")renderRebirthTab();
     if(activeTab==="settings")renderSettingsTab();
   }
-  function renderTeamTab(){dom.tabContent.innerHTML=`<div class="subheading">自动成长运行中 · 金币会优先投入当前瓶颈</div><div class="tab-grid">${HERO_DEFS.map((def,i)=>{const h=state.heroes[i],s=heroStats(i);return`<div class="info-card"><h3>${def.name} · ${def.role}</h3><p>攻击 <strong>${format(s.atk)}</strong>　生命 <strong>${format(s.hp)}</strong>　防御 <strong>${format(s.def)}</strong></p><p>等级 ${h.level} · 培养 +${h.training}</p>${def.skills.map((name,j)=>`<div class="skill-line"><span>${name}</span><strong>${j===0?"基础技能":h.skillLevels[j]===0?`Lv.${[0,10,25,50][j]}解锁`:`Lv.${h.skillLevels[j]}`}</strong></div>`).join("")}</div>`}).join("")}</div>`;}
-  function renderGearTab(){
-    const equipped=HERO_DEFS.map((def,i)=>`<div class="gear-column"><h3>${def.name}<button class="inline-btn" style="float:right" data-action="equip-best" data-hero="${i}">一键换装</button></h3>${["weapon","armor","relic"].map(slot=>{const g=state.heroes[i].gear[slot];return`<div class="gear-item"><div class="gear-icon ${g?`rarity-${g.rarity}`:"empty"}" style="${gearIconStyle(slot,g?.rarityIndex||0)}"></div><div>${g?`${g.rarity}${SLOT_NAMES[slot]} +${g.enhance}<small>战力 ${format(gearValue(g))}</small>`:`空${SLOT_NAMES[slot]}`}</div>${g?`<button class="inline-btn" data-action="enhance" data-hero="${i}" data-slot="${slot}">${g.enhance>=20?"已满":`${format(enhanceCost(g))}粉尘`}</button>`:""}</div>`}).join("")}</div>`).join("");
-    const bag=state.bag.slice(0,18).map(g=>`<div class="gear-item"><div class="gear-icon rarity-${g.rarity}" style="${gearIconStyle(g.slot,g.rarityIndex)}"></div><div>${g.rarity}${SLOT_NAMES[g.slot]} +${g.enhance}<small>战力 ${format(gearValue(g))} · ${g.locked?"已锁定":"未锁定"}</small></div><span><button class="inline-btn" data-action="lock" data-id="${g.id}">${g.locked?"解锁":"锁定"}</button> <button class="inline-btn" data-action="salvage" data-id="${g.id}">分解</button></span></div>`).join("")||`<p>背包为空。击败敌人会随机获得装备。</p>`;
-    dom.tabContent.innerHTML=`<div class="gear-grid">${equipped}</div><div class="info-card" style="margin-top:10px"><h3>无限背包 · ${state.bag.length}件</h3>${bag}</div>`;
-  }
-  function renderTalentTab(){dom.tabContent.innerHTML=`<div class="talent-layout">${Object.entries(TALENTS).map(([key,t])=>`<div class="talent-branch" style="border-color:${t.color}55"><h3 style="color:${t.color}">${t.name}</h3><small>${t.desc}</small><div class="talent-nodes">${Array.from({length:10},(_,i)=>`<button class="talent-node ${i<state.talents[key]?"on":""}" data-action="talent" data-branch="${key}" ${i>state.talents[key]?"disabled":""}>${i+1}</button>`).join("")}<button class="talent-node core ${state.talents[key+"Core"]?"on":""}" data-action="talent-core" data-branch="${key}" ${state.talents[key]<10?"disabled":""}>核心节点 · 20余烬</button></div></div>`).join("")}</div><button class="inline-btn" style="margin-top:10px" data-action="talent-reset">免费重置并返还全部余烬</button>`;}
+  function renderTeamTab(){dom.tabContent.innerHTML=`<div class="subheading">自动成长运行中 · 金币会优先投入当前瓶颈</div><div class="tab-grid">${HERO_DEFS.map((def,i)=>{const h=state.heroes[i],s=heroStats(i);return`<div class="info-card evolution-tier-${skillEvolutionTier(h.level)}"><h3>${def.name} · ${def.role}</h3><p>攻击 <strong>${format(s.atk)}</strong>　生命 <strong>${format(s.hp)}</strong>　防御 <strong>${format(s.def)}</strong></p><p>等级 ${h.level} · 培养 +${h.training} · 技能${skillEvolutionName(h.level)}</p>${def.skills.map((name,j)=>`<div class="skill-line"><span>${name}</span><strong>${j===0?"基础技能":h.skillLevels[j]===0?`Lv.${[0,10,25,50][j]}解锁`:`Lv.${h.skillLevels[j]}`}</strong></div>`).join("")}</div>`}).join("")}</div>`;}
   function renderCodexTab(){const entries=[];for(let i=1;i<=100;i++){const stage=i*100,seen=state.codex.bosses.includes(stage);entries.push(`<div class="codex-entry ${seen?"seen":""}"><b>${seen?bossName(stage):"???"}</b><span>第${stage}关</span></div>`)}dom.tabContent.innerHTML=`<div class="subheading">Boss图鉴 · ${state.codex.bosses.length}/100</div><div class="codex-grid">${entries.join("")}</div>`;}
-  function renderRebirthTab(){const can=state.bestStage>=100,nextCost=bonfireNodeCost();const start=Math.floor(state.bonfire.level/30)*30;const nodes=Array.from({length:30},(_,offset)=>{const i=start+offset,type=BONFIRE_NODE_TYPES[i%6],on=i<state.bonfire.level,next=i===state.bonfire.level;return`<div class="talent-node ${on?"on":""} ${next?"next":""}" title="${BONFIRE_NODE_NAMES[type]}">${i+1}<small>${BONFIRE_NODE_NAMES[type]}</small></div>`}).join("");dom.tabContent.innerHTML=`<div class="settings-grid"><div class="setting-card"><h3>篝火星图 · ${state.bonfire.level}级</h3><p>余烬会按固定顺序自动点亮永久增幅，不需要选择路线。下一节点需要 <strong>${nextCost}余烬</strong>。</p><div class="talent-nodes bonfire-map">${nodes}</div><p>攻击 ×${bonfireMultiplier("attack").toFixed(2)} · 生存 ×${bonfireMultiplier("vitality").toFixed(2)} · 金币 ×${bonfireMultiplier("gold").toFixed(2)}</p></div><div class="setting-card"><h3>智能重整</h3><p>同一Boss连续失败5次，且本次余烬足以带来至少约10%永久成长时自动重整。</p><div class="setting-row"><span>自动重整</span><button class="inline-btn" data-action="auto-rebirth-toggle">${state.bonfire.autoRebirth?"开启":"关闭"}</button></div><p>当前连续失败：${state.bonfire.bossFailures}/5</p><p>本次预计余烬：<strong>${rebirthReward()}</strong></p><button class="primary-btn" style="width:180px" data-action="rebirth-open" ${can?"":"disabled"}>${can?"立即重整":"第100关后解锁"}</button></div><div class="setting-card"><h3>远征记录</h3><p>历史最高：第${state.bestStage}关</p><p>重整次数：${state.rebirths}</p><p>累计击杀：${format(state.totalKills)}</p></div></div>`;}
+  function renderRebirthTab(){const can=state.bestStage>=100,nextCost=bonfireNodeCost();const start=Math.floor(state.bonfire.level/30)*30;const nodes=Array.from({length:30},(_,offset)=>{const i=start+offset,type=BONFIRE_NODE_TYPES[i%6],on=i<state.bonfire.level,next=i===state.bonfire.level;return`<div class="talent-node ${on?"on":""} ${next?"next":""}" title="${BONFIRE_NODE_NAMES[type]}">${i+1}<small>${BONFIRE_NODE_NAMES[type]}</small></div>`}).join("");dom.tabContent.innerHTML=`<div class="settings-grid"><div class="setting-card"><h3>篝火星图 · ${state.bonfire.level}级</h3><p>余烬会按固定顺序自动点亮永久增幅，不需要选择路线。下一节点需要 <strong>${nextCost}余烬</strong>。</p><div class="talent-nodes bonfire-map">${nodes}</div><p>攻击 ×${bonfireMultiplier("attack").toFixed(2)} · 生存 ×${bonfireMultiplier("vitality").toFixed(2)} · 金币 ×${bonfireMultiplier("gold").toFixed(2)}</p></div><div class="setting-card"><h3>智能重整</h3><p>任意关卡连续失败5次，且本次余烬足以带来至少约10%永久成长时自动重整。</p><div class="setting-row"><span>自动重整</span><button class="inline-btn" data-action="auto-rebirth-toggle">${state.bonfire.autoRebirth?"开启":"关闭"}</button></div><p>当前连续失败：${state.bonfire.bossFailures}/5</p><p>本次预计余烬：<strong>${rebirthReward()}</strong></p><button class="primary-btn" style="width:180px" data-action="rebirth-open" ${can?"":"disabled"}>${can?"立即重整":"第100关后解锁"}</button></div><div class="setting-card"><h3>远征记录</h3><p>历史最高：第${state.bestStage}关</p><p>重整次数：${state.rebirths}</p><p>累计击杀：${format(state.totalKills)}</p></div></div>`;}
   function renderSettingsTab(){
     dom.tabContent.innerHTML=`<div class="settings-grid">
       <div class="setting-card"><h3>界面与性能</h3>
@@ -980,24 +1066,18 @@
   function handleAction(action,data){
     if(action==="train")buyTraining(Number(data.hero));
     if(action==="skill"){const i=Number(data.hero),j=Number(data.skill),cost=skillCost(i,j);if(state.gold<cost)toast("金币不足",true);else{state.gold-=cost;state.heroes[i].skillLevels[j]++;renderTab();}}
-    if(action==="equip-best")equipBest(Number(data.hero));
-    if(action==="salvage")salvageItem(data.id);
-    if(action==="lock"){const g=state.bag.find(x=>x.id===data.id);if(g){g.locked=!g.locked;renderTab();}}
-    if(action==="enhance")enhanceEquipped(Number(data.hero),data.slot);
-    if(action==="talent")buyTalent(data.branch);
-    if(action==="talent-core")buyCore(data.branch);
-    if(action==="talent-reset")resetTalents();
     if(action==="priority"){state.autoTrain.priority=data.value;renderTab();}
-    if(action==="auto-salvage"){state.autoSalvage[data.value]=!state.autoSalvage[data.value];renderTab();}
     if(action==="save")saveState(true);
     if(action==="export")exportSave();
     if(action==="copy-save"){const text=$("#saveText")?.value||"";navigator.clipboard?.writeText(text).then(()=>toast("存档已复制到剪贴板")).catch(()=>toast("请手动选择并复制文本",true));}
     if(action==="import")importSaveModal();
     if(action==="clear-open")clearSaveModal();
-    if(action==="clear-confirm"){localStorage.removeItem(SAVE_KEY);location.reload();}
+    if(action==="clear-confirm"){safeStorageRemove(SAVE_KEY);location.reload();}
     if(action==="import-confirm")importSave();
     if(action==="rebirth-open")rebirthModal();
     if(action==="rebirth-confirm")performRebirth();
+    if(action==="restart-expedition-open")restartExpeditionModal();
+    if(action==="restart-expedition-confirm")restartExpedition();
     if(action==="open-hero")openDrawer("team");
     if(action==="ui-scale"){state.settings.uiScale=clamp(Number(data.value)||100,90,125);applyDisplaySettings();renderTab();saveState();}
     if(action==="contrast-toggle"){state.settings.highContrast=!state.settings.highContrast;applyDisplaySettings();renderTab();saveState();}
@@ -1051,7 +1131,7 @@
     }
     dom.enemySprite.classList.toggle("enemy-attacking",action==="attack");
     const enemy=e;
-    playSprite(dom.enemySprite,enemyFrameUrls(e.zoneIndex,e.enemyType,action),action==="attack"?420/state.speed:920,action!=="attack",()=>{
+    playSprite(dom.enemySprite,enemyFrameUrls(e.zoneIndex,e.enemyType,action),action==="attack"?420/currentSpeed():920,action!=="attack",()=>{
       if(runtime.enemy===enemy&&!runtime.enemy.boss){dom.enemySprite.classList.remove("enemy-attacking");setEnemyAction("idle");}
     });
   }
@@ -1063,7 +1143,7 @@
     if(action==="skill"||action==="ultimate")el.classList.add("action-skill");
     if(action==="hit")el.classList.add("action-hit");
     if(action==="down")el.classList.add("down");
-    const duration={idle:900,move:620,attack:450,skill:650,ultimate:720,hit:280,down:700}[action]/state.speed;
+    const duration={idle:900,move:620,attack:450,skill:650,ultimate:720,hit:280,down:700}[action]/currentSpeed();
     playSprite(el,heroFrameUrls(HERO_DEFS[i].id,action),duration,action==="idle",()=>{
       if(action!=="down"&&runtime.heroes[i].alive)setHeroAction(i,"idle");
     });
@@ -1086,11 +1166,16 @@
     el.innerHTML=`<b style="${gearIconStyle(slot,rarityIndex)}"></b>${Array.from({length:7},()=>"<i></i>").join("")}`;
     dom.fx.appendChild(el);setTimeout(()=>el.remove(),1100);
   }
-  function showBossIntro(stage){dom.bossTitle.textContent=bossName(stage);dom.bossIntro.classList.remove("hidden");setTimeout(()=>dom.bossIntro.classList.add("hidden"),2800/state.speed);}
+  function showBossIntro(stage){
+    const token=++runtime.introToken;
+    runtime.introSlow=true;
+    dom.bossTitle.textContent=`${bossName(stage)} · ${BOSS_MECHANICS[zoneOf(stage)].name}`;
+    dom.bossIntro.classList.remove("hidden");
+    renderSpeed();
+    setTimeout(()=>{if(token!==runtime.introToken)return;runtime.introSlow=false;dom.bossIntro.classList.add("hidden");renderSpeed();},2800);
+  }
   function discoverEnemy(){const e=runtime.enemy;if(e.boss)return;const id=`${e.zoneIndex}-${e.enemyType}`;if(!state.codex.enemies.includes(id))state.codex.enemies.push(id);}
   function bossName(stage){const zone=ZONES[zoneOf(stage)],evo=bossEvolution(stage);return `${zone.boss} · ${EVOLUTIONS[evo]}`;}
-  function zoneOf(stage){return clamp(Math.floor((stage-1)/1000),0,9);}
-  function bossEvolution(stage){return clamp(Math.ceil(((stage-1)%1000+1)/100)-1,0,9);}
 
   function floatNumber(text,x,y,crit=false,heal=false){const el=document.createElement("span");el.className=`float-number ${crit?"crit":""} ${heal?"heal":""}`;el.textContent=text;el.style.left=`${x}%`;el.style.top=`${y}%`;dom.damage.appendChild(el);setTimeout(()=>el.remove(),950);}
   function toastMini(text,x,y){floatNumber(text,x,y,false,true);}
@@ -1099,27 +1184,46 @@
   function rebirthModal(){openModal(`<h2 id="modalTitle">点燃重整篝火？</h2><p>返回第1关并重置金币、角色等级、技能等级与培养；装备、图鉴、篝火星图及最高纪录保留。</p><p>本次获得 <strong>${rebirthReward()} 灵魂余烬</strong>，并自动点亮星图节点。</p><button class="primary-btn" data-action="rebirth-confirm">确认重整</button>`);}
   function exportSave(){saveState();const data=btoa(unescape(encodeURIComponent(JSON.stringify(state))));openModal(`<h2 id="modalTitle">导出存档</h2><p>复制下方文本并妥善保存。</p><textarea id="saveText">${data}</textarea><button class="inline-btn" data-action="copy-save">手动复制文本</button>`);const ta=$("#saveText");ta.focus();ta.select();navigator.clipboard?.writeText(data).then(()=>toast("存档已复制到剪贴板")).catch(()=>{});}
   function importSaveModal(){openModal(`<h2 id="modalTitle">导入存档</h2><p>粘贴存档文本。当前进度将在验证成功后被替换。</p><textarea id="saveText" placeholder="在此粘贴存档"></textarea><button class="primary-btn" data-action="import-confirm">验证并导入</button>`);}
-  function importSave(){try{const text=$("#saveText").value.trim();const parsed=JSON.parse(decodeURIComponent(escape(atob(text))));if(parsed.version!==SAVE_VERSION)throw new Error("存档版本不兼容");state=mergeState(parsed);saveState();location.reload();}catch(e){toast("仅支持v3存档",true);}}
+  function importSave(){
+    try{
+      const text=$("#saveText").value.trim();
+      if(!text||text.length>SAVE_TEXT_LIMIT)throw new Error("存档为空或超过1MB限制");
+      const parsed=JSON.parse(decodeURIComponent(escape(atob(text))));
+      if(!parsed||Object.getPrototypeOf(parsed)!==Object.prototype||parsed.version!==SAVE_VERSION)throw new Error("存档版本不兼容");
+      state=mergeState(parsed);saveState();location.reload();
+    }catch(error){console.warn("存档导入失败",error);toast("存档无效：请确认是完整的v3导出文本",true);}
+  }
   function clearSaveModal(){openModal(`<h2 id="modalTitle">清空全部进度？</h2><p>此操作无法恢复。建议先导出存档。</p><button class="inline-btn danger-btn" data-action="clear-confirm">确认永久清空</button>`);}
-  function openModal(html){dom.modalBody.innerHTML=html;dom.modal.classList.remove("hidden");runtime.paused=true;}
-  function closeModal(){dom.modal.classList.add("hidden");runtime.paused=false;}
+  function restartExpeditionModal(){openModal(`<h2 id="modalTitle">重新开始万阶远征？</h2><p>将清空角色、装备、图鉴、篝火与全部纪录，并从第1关重新开始。此操作无法恢复，建议先导出当前存档。</p><button class="inline-btn danger-btn" data-action="restart-expedition-confirm">确认清空并重新开始</button>`);}
+  function restartExpedition(){safeStorageRemove(SAVE_KEY);state=initialState();saveState();location.reload();}
+  function openModal(html){modalReturnFocus=document.activeElement;dom.modalBody.innerHTML=html;dom.modal.classList.remove("hidden");runtime.paused=true;setTimeout(()=>focusFirst(dom.modal),0);}
+  function closeModal(){dom.modal.classList.add("hidden");runtime.paused=false;if(modalReturnFocus?.focus)modalReturnFocus.focus();modalReturnFocus=null;}
   function format(value){if(!Number.isFinite(value))return"∞";const abs=Math.abs(value);const units=[[1e24,"秭"],[1e20,"垓"],[1e16,"京"],[1e12,"兆"],[1e8,"亿"],[1e4,"万"]];for(const[u,n]of units)if(abs>=u)return`${(value/u).toFixed(abs>=u*100?0:abs>=u*10?1:2)}${n}`;return Math.floor(value).toLocaleString("zh-CN");}
   function formatDuration(sec){sec=Math.floor(sec);const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return`${h?`${h}小时`:""}${m?`${m}分钟`:""}${!h&&s?`${s}秒`:""}`||"0秒";}
   function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+  function escapeHtml(value){return String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);}
   function visualRandom(){visualRandomState=(1664525*visualRandomState+1013904223)>>>0;return visualRandomState/4294967296;}
 
   if (globalThis.__ABYSS_TEST_MODE__) {
     window.__ABYSS_TEST__ = {
       snapshot: () => JSON.parse(JSON.stringify({ state, runtime: { battleStage: runtime.battleStage, timer: runtime.timer, retryAt: runtime.retryAt, retryRemaining: runtime.retryRemaining, enemyAttack: runtime.enemyAttack, enemy: runtime.enemy, heroes: runtime.heroes } })),
       setStage: stage => { state.completed = false; state.stage = clamp(stage, 1, MAX_STAGE); resetPartyRuntime(); spawnStage(state.stage, true); },
-      winNow: () => { if (runtime.enemy) { runtime.enemy.hp = 0; winStage(true); } },
+      winNow: () => { if (runtime.enemy) { runtime.enemy.hp = 0; winStage(true); advanceTransition(KILL_TRANSITION_SECONDS); } },
+      beginWinNow: () => { if (runtime.enemy) { runtime.enemy.hp = 0; winStage(true); } },
       failNow: () => failStage(true),
       retryNow: () => { runtime.retryAt = 0; runtime.retryRemaining = 0; maybeAutoChallenge(); },
       backgroundSeconds: seconds => simulateBackground(seconds * state.speed),
       detailedSeconds: seconds => simulateForeground(seconds),
       openSeconds: seconds => { let remaining = seconds; while (remaining > 0 && !state.completed) { renderSpeed(); const realChunk = Math.min(600, remaining); simulateBackground(realChunk * state.speed); remaining -= realChunk; } },
       setBestStage: stage => { state.bestStage = clamp(stage, 1, MAX_STAGE); },
-      rebirthNow: () => performRebirth()
+      rebirthNow: () => performRebirth(),
+      sanitize: value => mergeState(value),
+      escapeHtml,
+      bossMechanic: stage => ({ ...BOSS_MECHANICS[zoneOf(stage)] }),
+      heroStats: index => ({ ...heroStats(index) }),
+      setHeroLevel: (index, level) => { state.heroes[index].level = clamp(Math.floor(level), 1, 100000); refreshPartyStats(); },
+      heroHitNow: amount => dealDamage(amount, 1, false),
+      enemyAttackNow: () => enemyAttack()
     };
   }
   init();
